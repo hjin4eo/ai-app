@@ -29,6 +29,30 @@ class BaseModel(abc.ABC):
             {"files": [관련 파일 경로 목록], "approach": "구현 방법 설명"}
         """
 
+    @abc.abstractmethod
+    def review_code(self, request: str, diff: str) -> dict:
+        """Phase 3: 생성된 코드 리뷰.
+
+        Returns:
+            {
+              "one_line": "한 줄 요약 (텔레그램 알림용)",
+              "summary": "파일별 설명",
+              "score": 1~10,
+              "issues": ["문제점 목록"] or []
+            }
+        """
+
+
+REVIEW_PROMPT = """You are a senior software engineer reviewing AI-generated code.
+You will be given a task description and a git diff of the changes made.
+Analyze the diff and return a JSON review with:
+- "one_line": one sentence (Korean) summarizing what was built, e.g. "URL 크롤링 WebScraper 클래스 추가"
+- "summary": 2-4 sentences (Korean) describing each file changed and what it does
+- "score": integer 1-10 quality score (10=excellent, 1=broken)
+- "issues": list of strings (Korean) describing bugs, missing error handling, or concerns (empty list if none)
+
+Return ONLY valid JSON. Example:
+{"one_line": "WebScraper 클래스 추가 — URL 크롤링 후 00_Raw 저장", "summary": "agent/services/scraper.py: WebScraper 클래스 신설. scrape(url) 메서드가 BeautifulSoup으로 텍스트 추출 후 파일 저장.", "score": 7, "issues": ["에러 시 빈 파일 생성될 수 있음", "저장 경로 하드코딩"]}"""
 
 PLAN_PROMPT = """You are an expert software engineer. You will be given a task description.
 Analyze the task and return a JSON plan with:
@@ -113,6 +137,15 @@ class ClaudeModel(BaseModel):
         )
         return json.loads(msg.content[0].text)
 
+    def review_code(self, request: str, diff: str) -> dict:
+        msg = self._client.messages.create(
+            model=self._model,
+            max_tokens=1024,
+            system=REVIEW_PROMPT,
+            messages=[{"role": "user", "content": f"## 태스크\n{request}\n\n## Git Diff\n```diff\n{diff}\n```"}],
+        )
+        return json.loads(msg.content[0].text)
+
 
 class OpenAIModel(BaseModel):
     def __init__(self, api_key: str, model: str = "gpt-4o"):
@@ -170,6 +203,17 @@ class OpenAIModel(BaseModel):
         )
         return json.loads(resp.choices[0].message.content)
 
+    def review_code(self, request: str, diff: str) -> dict:
+        resp = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": REVIEW_PROMPT},
+                {"role": "user", "content": f"## 태스크\n{request}\n\n## Git Diff\n```diff\n{diff}\n```"},
+            ],
+            max_tokens=1024,
+        )
+        return json.loads(resp.choices[0].message.content)
+
 
 class LlamaCppModel(BaseModel):
     """LM Studio / llama-cpp-python OpenAI 호환 서버용 모델."""
@@ -224,6 +268,18 @@ class LlamaCppModel(BaseModel):
                 text = text[4:]
         return json.loads(text.strip())
 
+    def review_code(self, request: str, diff: str) -> dict:
+        text = self._call(
+            REVIEW_PROMPT,
+            f"## 태스크\n{request}\n\n## Git Diff\n```diff\n{diff}\n```",
+            max_tokens=1024, timeout=120
+        )
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
 
 class OllamaModel(BaseModel):
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen2.5-coder:32b"):
@@ -271,6 +327,18 @@ class OllamaModel(BaseModel):
 
     def plan_changes(self, request: str) -> dict:
         text = self._call(PLAN_PROMPT, request, timeout=60)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
+    def review_code(self, request: str, diff: str) -> dict:
+        text = self._call(
+            REVIEW_PROMPT,
+            f"## 태스크\n{request}\n\n## Git Diff\n```diff\n{diff}\n```",
+            timeout=120
+        )
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):

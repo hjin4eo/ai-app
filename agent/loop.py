@@ -171,7 +171,7 @@ def delete_branch(branch: str) -> None:
     _git(["push", "origin", "--delete", branch], check=False)
 
 
-def _create_pr(repo, task_id: str, branch: str, description: str, plan: dict) -> str:
+def _create_pr(repo, task_id: str, branch: str, description: str, plan: dict, review: dict = None) -> str:
     """GitHub PR 생성 후 PR URL 반환. 실패 시 빈 문자열."""
     try:
         approach = plan.get("approach", "")
@@ -181,6 +181,11 @@ def _create_pr(repo, task_id: str, branch: str, description: str, plan: dict) ->
             body_lines.append(f"### 구현 방향\n{approach}\n")
         if files:
             body_lines.append("### 관련 파일\n" + "\n".join(f"- `{f}`" for f in files))
+        if review and review.get("summary"):
+            score = review.get("score", 0)
+            body_lines.append(f"### AI 코드 리뷰 ({score}/10)\n{review['summary']}")
+            if review.get("issues"):
+                body_lines.append("#### 지적 사항\n" + "\n".join(f"- {i}" for i in review["issues"]))
         body_lines.append("\n---\n🤖 AI 자동 생성 — `/merge {id}` 로 승인, `/reject {id}` 로 거부".replace("{id}", task_id))
         pr = repo.create_pull(
             title=f"[AI] {description[:72]}",
@@ -307,7 +312,21 @@ def process_pending_task(model, repo=None) -> bool:
 
         _step(task_id, "test_pass", f"✅ 테스트 통과\n<code>{task_id}</code>")
 
-        # ── 5. 커밋 & Push (Phase 2 Step 4: 논리 단위별 분할 커밋) ────────
+        # ── 5. AI 코드 리뷰 (Phase 3) ────────────────────────────────────
+        _step(task_id, "reviewing", f"🔍 코드 리뷰 중...\n<code>{task_id}</code>")
+        review = _review_changes(task_id, description, model)
+        if review.get("one_line"):
+            score = review.get("score", 0)
+            score_emoji = "🟢" if score >= 8 else "🟡" if score >= 5 else "🔴"
+            _notify(
+                f"🔍 <b>코드 리뷰 완료</b>\n"
+                f"<code>{task_id}</code>\n"
+                f"📦 {review['one_line']}\n"
+                f"{score_emoji} 점수: {score}/10"
+                + (f"\n⚠️ " + "\n⚠️ ".join(review['issues']) if review.get('issues') else "")
+            )
+
+        # ── 6. 커밋 & Push (Phase 2 Step 4: 논리 단위별 분할 커밋) ────────
         _step(task_id, "pushing",
               f"⬆️ 커밋 & Push 중...\n<code>{branch}</code>")
         ok, err = commit_in_groups(task_id, description, branch)
@@ -316,7 +335,8 @@ def process_pending_task(model, repo=None) -> bool:
             pr_url = ""
             if repo is not None:
                 pr_url = _create_pr(repo, task_id, branch, description,
-                                    plan if "plan" in dir() else {})
+                                    plan if "plan" in dir() else {},
+                                    review if "review" in dir() else {})
                 if pr_url:
                     update_task(task_id, status="completed",
                                 result=f"브랜치 {branch} push 완료", pr_url=pr_url)
@@ -549,6 +569,28 @@ def commit_in_groups(task_id: str, description: str, branch: str) -> tuple[bool,
     if r.returncode != 0:
         return False, f"push 실패: {r.stderr.strip()[:200]}"
     return True, ""
+
+
+def _review_changes(task_id: str, description: str, model) -> dict:
+    """AI 코드 리뷰 — 현재 워킹트리 diff를 분석해 요약·점수·이슈 반환."""
+    try:
+        diff = subprocess.run(
+            ["git", "diff", "master..HEAD", "--unified=3"],
+            cwd=WORK_DIR, capture_output=True, text=True
+        ).stdout
+        if not diff.strip():
+            # staged but not committed yet — diff against HEAD
+            diff = subprocess.run(
+                ["git", "diff"],
+                cwd=WORK_DIR, capture_output=True, text=True
+            ).stdout
+        diff = diff[:6000]  # 토큰 절약
+        review = model.review_code(description[:500], diff)
+        update_task(task_id, review=review)
+        return review
+    except Exception as e:
+        log.warning("코드 리뷰 실패: %s", e)
+        return {"one_line": "", "summary": "", "score": 0, "issues": []}
 
 
 def _run_tests(task_id: str) -> tuple[bool, str, str]:
