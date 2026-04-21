@@ -32,7 +32,7 @@ agent:
   embedding_model: "text-embedding-nomic-embed-text-v1.5" # 임베딩 모델 (LM Studio)
   embedding_backend: "lm-studio"      # 임베딩 백엔드: ollama(11434) / lm-studio(1234)
   knowledge_dir: "/home/home/Jin_lifestyle/10_Wiki"  # 지식 저장소 경로
-  work_dir: "."            # AI가 수정할 코드 디렉토리
+  work_dir: "/home/home/ai-worker"  # AI가 수정할 코드 디렉토리
 
 anthropic:
   api_key: ""             # .env의 ANTHROPIC_API_KEY 사용

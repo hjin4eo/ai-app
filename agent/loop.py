@@ -29,7 +29,30 @@ POLL_INTERVAL = int(CFG["github"]["poll_interval"])
 MAX_RETRIES = int(CFG["agent"]["max_retries"])
 WORK_DIR = Path(CFG["agent"].get("work_dir", ".")).resolve()
 
+# AI 태스크가 절대 수정할 수 없는 파일 (WORK_DIR 기준 상대경로)
+PROTECTED = {
+    "agent/loop.py",
+    "config.yaml",
+    ".env",
+    "agent/core/task_queue.py",
+    "agent/core/bot_config.py",
+    "agent/core/models.py",
+}
+PROTECTED_DIRS = {"venv", ".venv", "node_modules", ".git", "tasks"}
+
 log = logging.getLogger(__name__)
+
+
+def _is_protected(path: Path) -> bool:
+    try:
+        rel = str(path.relative_to(WORK_DIR))
+    except ValueError:
+        rel = str(path)
+    if rel in PROTECTED:
+        return True
+    if any(part in PROTECTED_DIRS for part in path.parts):
+        return True
+    return False
 
 
 def _notify(text: str) -> None:
@@ -120,9 +143,11 @@ def process_pending_task(model) -> bool:
                 
                 for file_path, content in files.items():
                     p = WORK_DIR / file_path
+                    if _is_protected(p):
+                        log.warning("보호 파일 쓰기 시도 차단 (폴백): %s", file_path)
+                        continue
                     p.parent.mkdir(parents=True, exist_ok=True)
                     p.write_text(content, encoding="utf-8")
-                    # 수정된 파일만 정밀하게 Git 인덱스에 추가
                     _git(["add", str(file_path)])
                 _step(task_id, "fallback_applied", "✅ 전체 파일 쓰기 완료")
             except Exception as e:
@@ -145,7 +170,8 @@ def process_pending_task(model) -> bool:
         _step(task_id, "pushing",
               f"⬆️ 커밋 & Push 중...\n<code>{branch}</code>")
         msg = f"feat: AI 태스크 {task_id} — {description[:60]}"
-        if commit_and_push(msg, branch=branch):
+        ok, err = commit_and_push(msg, branch=branch)
+        if ok:
             update_task(task_id, status="completed", result=f"브랜치 {branch} push 완료")
             _notify(
                 f"✅ <b>태스크 완료</b>\n"
@@ -153,8 +179,8 @@ def process_pending_task(model) -> bool:
                 f"🌿 <code>{branch}</code>"
             )
         else:
-            update_task(task_id, status="failed", result="push 실패")
-            _notify(f"❌ <b>Push 실패</b>\n<code>{task_id}</code>")
+            update_task(task_id, status="failed", result=err)
+            _notify(f"❌ <b>Push 실패</b>\n<code>{task_id}</code>\n<code>{err}</code>")
 
         _git(["checkout", "master"], check=False)
 
@@ -197,20 +223,19 @@ def get_run_log(run) -> str:
 
 
 def get_code_context() -> str:
-    """수정 대상 코드 파일들을 하나의 문자열로 합침."""
+    """수정 대상 코드 파일들을 하나의 문자열로 합침. 보호 파일 제외."""
     extensions = {".py", ".js", ".ts", ".jsx", ".tsx"}
     parts = []
     for ext in extensions:
         for p in sorted(WORK_DIR.rglob(f"*{ext}")):
-            # venv, node_modules, .git 제외
-            if any(skip in p.parts for skip in ("venv", ".venv", "node_modules", ".git")):
+            if _is_protected(p):
                 continue
             try:
                 content = p.read_text(errors="replace")
                 parts.append(f"### {p.relative_to(WORK_DIR)}\n{content}")
             except Exception:
                 pass
-    return "\n\n".join(parts)[:12000]  # 12000자 제한
+    return "\n\n".join(parts)[:12000]
 
 
 def apply_patch(patch: str) -> bool:
@@ -226,24 +251,41 @@ def apply_patch(patch: str) -> bool:
         if result.returncode != 0:
             log.warning("패치 적용 실패:\n%s", result.stderr)
             return False
+        # 보호 파일 수정 시 패치 되돌림
+        touched = subprocess.run(
+            ["git", "diff", "--name-only"], cwd=WORK_DIR, capture_output=True, text=True
+        ).stdout.splitlines()
+        blocked = [f for f in touched if _is_protected(WORK_DIR / f)]
+        if blocked:
+            subprocess.run(["git", "checkout", "--"] + touched, cwd=WORK_DIR, capture_output=True)
+            log.warning("보호 파일 수정 시도 차단: %s", blocked)
+            return False
         return True
     finally:
         os.unlink(patch_file)
 
 
-def commit_and_push(message: str, branch: str = None) -> bool:
-    """변경사항 커밋 후 push. branch 지정 시 원격에 새 브랜치로 push."""
+def commit_and_push(message: str, branch: str = None) -> tuple[bool, str]:
+    """변경사항 커밋 후 push. (success, error_msg) 반환."""
     try:
-        subprocess.run(["git", "add", "-A"], cwd=WORK_DIR, check=True)
-        subprocess.run(["git", "commit", "-m", message], cwd=WORK_DIR, check=True)
-        if branch:
-            subprocess.run(["git", "push", "-u", "origin", branch], cwd=WORK_DIR, check=True)
-        else:
-            subprocess.run(["git", "push"], cwd=WORK_DIR, check=True)
-        return True
+        subprocess.run(["git", "add", "-A"], cwd=WORK_DIR, check=True, capture_output=True)
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=WORK_DIR, capture_output=True, text=True)
+        if not status.stdout.strip():
+            return False, "변경사항 없음 — AI가 코드를 수정하지 않았습니다."
+        r = subprocess.run(["git", "commit", "-m", message], cwd=WORK_DIR, capture_output=True, text=True)
+        if r.returncode != 0 and "nothing to commit" in r.stdout + r.stderr:
+            return False, "변경사항 없음 — AI가 코드를 수정하지 않았습니다."
+        if r.returncode != 0:
+            return False, f"commit 실패: {r.stderr.strip()[:200]}"
+        push_args = ["git", "push", "-u", "origin", branch] if branch else ["git", "push"]
+        r = subprocess.run(push_args, cwd=WORK_DIR, capture_output=True, text=True)
+        if r.returncode != 0:
+            return False, f"push 실패: {r.stderr.strip()[:200]}"
+        return True, ""
     except subprocess.CalledProcessError as e:
-        log.error("commit/push 실패: %s", e)
-        return False
+        err = (e.stderr or str(e))[:200]
+        log.error("commit/push 실패: %s", err)
+        return False, err
 
 
 def cancel_run(run) -> None:
@@ -290,12 +332,13 @@ def main():
                             seen_runs.add(run.id)
                         elif apply_patch(patch):
                             msg = f"fix: AI 자동 수정 (run #{run.id}, 시도 {retries + 1})"
-                            if commit_and_push(msg):
+                            ok, err = commit_and_push(msg)
+                            if ok:
                                 log.info("수정 push 완료.")
                                 retry_count[run.id] = retries + 1
                                 seen_runs.add(run.id)
                             else:
-                                log.error("push 실패")
+                                log.error("push 실패: %s", err)
                         else:
                             log.warning("패치 적용 실패.")
                             seen_runs.add(run.id)
