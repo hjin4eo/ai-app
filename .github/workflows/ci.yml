@@ -1,0 +1,69 @@
+name: AI Worker CI
+
+on:
+  push:
+    branches: ["master", "main"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    env:
+      DISPLAY: ":1"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -q -r requirements.txt
+          playwright install chromium
+
+      - name: Run tests
+        id: run_tests
+        run: |
+          source venv/bin/activate
+          python tests/runner.py 2>&1 | tee /tmp/test_output.txt
+        continue-on-error: true
+
+      - name: Upload screenshot on failure
+        if: steps.run_tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-screenshot
+          path: /tmp/test_fail_*.png
+          if-no-files-found: ignore
+
+      - name: Notify Discord on failure
+        if: steps.run_tests.outcome == 'failure'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          source venv/bin/activate
+          python agent/discord_notify.py \
+            --status fail \
+            --log /tmp/test_output.txt \
+            --screenshot /tmp/test_fail_*.png \
+            --run-id ${{ github.run_id }} \
+            --repo ${{ github.repository }}
+
+      - name: Notify Discord on success
+        if: steps.run_tests.outcome == 'success'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          source venv/bin/activate
+          python agent/discord_notify.py \
+            --status pass \
+            --run-id ${{ github.run_id }} \
+            --repo ${{ github.repository }}
+
+      - name: Fail job if tests failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

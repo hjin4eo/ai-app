@@ -1,0 +1,8 @@
+venv/
+.claude/
+.gemini/
+.antigravity-server/
+.codex/
+__pycache__/
+*.log
+data/chroma_db/

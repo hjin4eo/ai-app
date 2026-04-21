@@ -1,0 +1,51 @@
+github:
+  repo: "hjin4eo/ai-app"
+  token: ""               # .env의 GITHUB_TOKEN 사용
+  poll_interval: 30
+
+discord:
+  webhook_url: ""         # .env의 DISCORD_WEBHOOK_URL 사용
+  bot_token: ""           # .env의 DISCORD_BOT_TOKEN 사용
+  admin_id: ""            # .env의 DISCORD_ADMIN_ID 사용 (관리자 Discord user ID)
+  allowed_user_ids: ""    # .env의 DISCORD_ALLOWED_USER_IDS 사용 (콤마 구분)
+  ollama_model: ""        # 디스코드 전용 모델 (비어있으면 agent.ollama_model 사용)
+  format: "markdown"      # 출력 포맷: markdown
+
+telegram:
+  bot_token: ""           # .env의 TELEGRAM_BOT_TOKEN 사용
+  chat_id: ""             # .env의 TELEGRAM_CHAT_ID 사용 (관리자)
+  allowed_chat_ids: ""    # .env의 TELEGRAM_ALLOWED_CHAT_IDS 사용 (콤마 구분, 일반 사용자)
+  ollama_model: ""        # 텔레그램 전용 모델 (비어있으면 agent.ollama_model 사용)
+  format: "html"          # 출력 포맷: html
+
+agent:
+  model: "ollama"       # claude / openai / ollama / llama-cpp
+  ollama_model: "gemma4:e4b-it-q8_0"   # Ollama 기본 모델
+  num_ctx: 24000           # Ollama 컨텍스트 사이즈 (24K)
+  vision_num_ctx: 7000     # 비전 처리용 컨텍스트 사이즈 (7K)
+  chat_history_limit: 50   # 불러올 최근 대화 개수
+  search_result_limit: 10000 # 웹 검색 결과 가공 길이
+  max_retries: 5
+  rag_enabled: true        # RAG 활성 여부
+  chunk_size: 512          # 문서 조각 크기 (토큰/글자 기준)
+  chunk_overlap: 50        # 조각 간 중첩 길이
+  embedding_model: "text-embedding-nomic-embed-text-v1.5" # 임베딩 모델 (LM Studio)
+  embedding_backend: "lm-studio"      # 임베딩 백엔드: ollama(11434) / lm-studio(1234)
+  knowledge_dir: "/home/home/Jin_lifestyle/10_Wiki"  # 지식 저장소 경로
+  work_dir: "."            # AI가 수정할 코드 디렉토리
+
+anthropic:
+  api_key: ""             # .env의 ANTHROPIC_API_KEY 사용
+
+openai:
+  api_key: ""             # .env의 OPENAI_API_KEY 사용
+
+ollama:
+  url: "http://localhost:11434"
+
+llama_cpp:
+  url: "http://localhost:1234"    # LM Studio OpenAI 호환 엔드포인트
+  model: "gemma-4-26b-a4b-it-claude-opus-distill-apex"  # LM Studio 로드된 모델명
+
+github_runner:
+  service_pattern: "actions.runner.*"
