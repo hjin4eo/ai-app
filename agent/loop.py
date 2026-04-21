@@ -82,6 +82,50 @@ def _branch_exists(branch: str) -> bool:
     return branch in r.stdout
 
 
+def _notify_diff(task_id: str, branch: str) -> None:
+    """완료된 태스크의 변경 파일 목록 + 통계를 Telegram으로 전송."""
+    try:
+        # 변경된 파일 목록 (master 대비)
+        stat = _git(["diff", "master..HEAD", "--stat"], check=False)
+        files = _git(["diff", "master..HEAD", "--name-status"], check=False)
+
+        if not files.stdout.strip():
+            return
+
+        lines = []
+        added, modified, deleted = [], [], []
+        for line in files.stdout.strip().splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) != 2:
+                continue
+            status, path = parts[0][0], parts[1]
+            if status == "A":
+                added.append(path)
+            elif status == "M":
+                modified.append(path)
+            elif status == "D":
+                deleted.append(path)
+
+        if added:
+            lines.append(f"➕ <b>추가</b> ({len(added)}개)\n" + "\n".join(f"  <code>{f}</code>" for f in added))
+        if modified:
+            lines.append(f"✏️ <b>수정</b> ({len(modified)}개)\n" + "\n".join(f"  <code>{f}</code>" for f in modified))
+        if deleted:
+            lines.append(f"🗑 <b>삭제</b> ({len(deleted)}개)\n" + "\n".join(f"  <code>{f}</code>" for f in deleted))
+
+        # --stat 마지막 줄 (예: "3 files changed, 45 insertions(+), 2 deletions(-)")
+        summary = stat.stdout.strip().splitlines()[-1] if stat.stdout.strip() else ""
+
+        msg = (
+            f"📋 <b>변경 내역</b> <code>{task_id}</code>\n"
+            + "\n\n".join(lines)
+            + (f"\n\n📊 {summary}" if summary else "")
+        )
+        _notify(msg)
+    except Exception as e:
+        log.warning("diff 알림 실패: %s", e)
+
+
 def _step(task_id: str, step: str, msg: str) -> None:
     """태스크 진행 단계 기록 + Telegram 알림."""
     update_task(task_id, result=f"[{step}] {msg}")
@@ -178,6 +222,7 @@ def process_pending_task(model) -> bool:
                 f"<code>{task_id}</code>: {description[:60]}\n"
                 f"🌿 <code>{branch}</code>"
             )
+            _notify_diff(task_id, branch)
         else:
             update_task(task_id, status="failed", result=err)
             _notify(f"❌ <b>Push 실패</b>\n<code>{task_id}</code>\n<code>{err}</code>")
