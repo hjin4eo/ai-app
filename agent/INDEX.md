@@ -34,12 +34,27 @@
 | `/search <검색어>` | 웹 검색 + AI 요약 |
 | `/ask <질문>` | RAG 지식 검색 |
 | `/clip <URL>` | URL 클리핑 → 지식 저장 |
-| `/reinforce` | 00_Raw → 10_Wiki 구조화 |
+| `/roadmap` | AI 정보 자동화 3단계 로드맵 |
+| `/clear` | 대화 기록 초기화 |
+| `/reinforce` | 00_Raw → 10_Wiki 구조화 + RAG 재인덱싱 |
+| `/reindex` | ChromaDB 초기화 후 전체 재인덱싱 (관리자) |
+| `/index` | RAG 인덱스 수동 갱신 (관리자) |
 | `/stats` | 위키 현황 통계 |
+| `/lint` | 위키 건강 점검 (깨진 링크·고아 탐지) |
 | `/status` | 서버 상태 (CPU/RAM/GPU) |
-| `/service <이름> <start\|stop\|restart>` | 서비스 제어 (관리자) |
+| `/ps` | 프로세스 목록 |
 | `/sh <명령>` | 셸 명령 실행 (관리자) |
+| `/py <코드>` | Python 코드 실행 (관리자) |
+| `/capture` | 스크린샷 캡처 |
+| `/service <이름> <start\|stop\|restart>` | 서비스 제어 (관리자) |
+| `/restart_runner` | GitHub Actions 러너 재시작 (관리자) |
+| `/weather_sync` | 날씨 강제 동기화 |
 | `/switch [lm\|ollama]` | 모델 백엔드 전환 (관리자) |
+| `/allow <chat_id>` | 사용자 허용 (관리자) |
+| `/deny <chat_id>` | 사용자 차단 (관리자) |
+| `/users` | 허용 목록 조회 (관리자) |
+| `/ci_status` | 최근 CI 실행 결과 |
+| `/loop_status` | AI 루프 실행 상태 |
 
 ### 개발해봇 (개발 워크플로우)
 | 명령어 | 설명 |
