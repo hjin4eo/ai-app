@@ -40,15 +40,19 @@ GITHUB_TOKEN=...                # GitHub PAT (repo + workflow 권한)
 
 ## 3. systemd 서비스 목록
 
-| 서비스 | 파일 | 역할 | 자동시작 |
-|--------|------|------|---------|
-| `telegram-bot` | `/etc/systemd/system/telegram-bot.service` | 알리미 챗봇 | ✅ |
-| `dev-bot` | `/etc/systemd/system/dev-bot.service` | 개발해봇 | ✅ |
-| `ai-loop` | `/etc/systemd/system/ai-loop.service` | AI 피드백 루프 | ✅ |
-| `discord-agent` | `/etc/systemd/system/discord-agent.service` | 디스코드 봇 | — |
-| `llama-cpp` | `/etc/systemd/system/llama-cpp.service` | LM Studio 서버 | — |
-| `nanoclaw-monitor` | `/etc/systemd/system/nanoclaw-monitor.service` | 모니터링 | — |
-| `github-runner` | `/etc/systemd/system/github-runner.service` | Actions 러너 | — |
+| 서비스 | 역할 | enable |
+|--------|------|--------|
+| `telegram-bot` | 알리미 챗봇 | ✅ |
+| `dev-bot` | 개발해봇 | ✅ |
+| `ai-loop` | AI 피드백 루프 (loop.py) | ✅ |
+| `ollama` | Ollama LLM 서버 (11434) | ✅ |
+| `llama-cpp` | Gemma4 llama-cpp 서버 (8080) | — |
+| `xvfb` | 가상 디스플레이 (Playwright headless) | — |
+| `discord-agent` | 디스코드 봇 | — |
+| `github-runner` | GitHub Actions 자체 호스팅 러너 | — |
+| `nanoclaw-monitor` | 모니터링 | — |
+
+> `ai-loop`만 신규 생성 필요 — 나머지는 기존 서버에 이미 존재.
 
 ### 서비스 파일 내용
 
