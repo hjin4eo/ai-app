@@ -598,8 +598,11 @@ def _decompose_task(task_id: str, description: str, model) -> list[str]:
     부모 태스크가 있는 경우(child) 분해 안 함 — 무한 분해 방지.
     """
     try:
-        result = model.decompose_task(description)
+        result = model.decompose_task(description[:800])
+        log.info("태스크 분해 판단: is_complex=%s, subtasks=%d개",
+                 result.get("is_complex"), len(result.get("subtasks", [])))
         if not result.get("is_complex"):
+            log.info("태스크 %s — 단순 태스크로 판단, 분해 없이 진행", task_id)
             return []
         subtasks_desc = result.get("subtasks", [])
         if len(subtasks_desc) < 2:

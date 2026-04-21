@@ -57,20 +57,24 @@ class BaseModel(abc.ABC):
 DECOMPOSE_PROMPT = """You are a senior software engineer breaking down a development task.
 Analyze the task description and decide if it is too large or vague to implement in one step.
 
-A task is complex if it:
-- Requires creating or modifying more than 3 files
-- Describes a system/feature rather than a specific implementation
-- Contains multiple independent features
+A task IS complex (is_complex: true) if ANY of these apply:
+- Longer than 200 characters
+- Mentions a "system", "pipeline", "architecture", or "document"
+- Requires creating or modifying more than 2 files
+- Contains multiple independent features or steps
+- Is vague about which specific file or function to implement
 
-If complex, break it into 2-5 specific, actionable subtasks. Each subtask must:
-- Name the specific file(s) to create or modify
-- Describe exactly one function/class/command to implement
-- Specify inputs and outputs
+A task is simple (is_complex: false) only if it clearly names ONE file and ONE function/command to implement.
+
+If complex, break it into 2-5 specific, actionable subtasks. Each subtask MUST:
+- Name the exact file path to create or modify
+- Describe exactly one function/class/command
+- Be implementable in a single coding session
 
 Return ONLY valid JSON:
-{"is_complex": true, "subtasks": ["agent/services/scraper.py 만들어줘. WebScraper 클래스, scrape(url) → str 반환.", "bot_commands.py에 /scrape <url> 명령어 추가. WebScraper 호출 후 결과 텔레그램 응답."]}
+{"is_complex": true, "subtasks": ["agent/services/scraper.py 만들어줘. WebScraper 클래스, scrape(url) → str 반환.", "agent/handlers/bot_commands.py에 /scrape <url> 명령어 추가. WebScraper 호출 후 결과 텔레그램 응답."]}
 
-If the task is already specific enough for one implementation step:
+If truly simple:
 {"is_complex": false, "subtasks": []}"""
 
 REVIEW_PROMPT = """You are a senior software engineer reviewing AI-generated code.
