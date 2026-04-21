@@ -279,7 +279,7 @@ def process_pending_task(model, repo=None) -> bool:
                 if retries < MAX_RETRIES - 1:
                     update_task(task_id, status="pending", retries=retries + 1)
                     _git(["checkout", "master"], check=False)
-                    _git(["clean", "-fd"], check=False)
+                    _git(["clean", "-fd", "--exclude=tasks/", "--exclude=data/"], check=False)
                     delete_branch(branch)
                     _notify(
                         f"⚠️ <b>패치 & 폴백 실패 — 재시도 예약</b> ({retries + 1}/{MAX_RETRIES})\n"
@@ -288,7 +288,7 @@ def process_pending_task(model, repo=None) -> bool:
                 else:
                     update_task(task_id, status="failed", result=f"패치/폴백 {MAX_RETRIES}회 실패: {e}")
                     _git(["checkout", "master"], check=False)
-                    _git(["clean", "-fd"], check=False)
+                    _git(["clean", "-fd", "--exclude=tasks/", "--exclude=data/"], check=False)
                     delete_branch(branch)
                     _notify(f"❌ <b>태스크 최대 재시도 초과</b>\n<code>{task_id}</code>")
                 return True
@@ -307,7 +307,7 @@ def process_pending_task(model, repo=None) -> bool:
             if retries < MAX_RETRIES - 1:
                 update_task(task_id, status="pending", retries=retries + 1)
                 _git(["checkout", "master"], check=False)
-                _git(["clean", "-fd"], check=False)
+                _git(["clean", "-fd", "--exclude=tasks/", "--exclude=data/"], check=False)
                 delete_branch(branch)
                 _notify(
                     f"⚠️ <b>테스트 실패 — 재시도 예약</b> ({retries + 1}/{MAX_RETRIES})\n"
@@ -317,7 +317,7 @@ def process_pending_task(model, repo=None) -> bool:
                 update_task(task_id, status="failed",
                             result=f"테스트 {MAX_RETRIES}회 실패: {test_output[-100:]}")
                 _git(["checkout", "master"], check=False)
-                _git(["clean", "-fd"], check=False)
+                _git(["clean", "-fd", "--exclude=tasks/", "--exclude=data/"], check=False)
                 delete_branch(branch)
                 _notify(f"❌ <b>테스트 최대 재시도 초과</b>\n<code>{task_id}</code>")
             return True
