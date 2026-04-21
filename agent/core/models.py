@@ -21,6 +21,22 @@ class BaseModel(abc.ABC):
     def generate_patch(self, request: str, code_context: str) -> str:
         """사용자 요청과 코드 컨텍스트를 받아 Unified Diff 패치를 반환."""
 
+    @abc.abstractmethod
+    def plan_changes(self, request: str) -> dict:
+        """Phase 2: 실행 전 계획 수립.
+
+        Returns:
+            {"files": [관련 파일 경로 목록], "approach": "구현 방법 설명"}
+        """
+
+
+PLAN_PROMPT = """You are an expert software engineer. You will be given a task description.
+Analyze the task and return a JSON plan with:
+- "files": list of file paths (relative to repo root) most relevant to this task
+- "approach": 1-3 sentence description of how you will implement the changes
+
+Return ONLY valid JSON. Example:
+{"files": ["agent/handlers/bot_commands.py", "agent/core/task_queue.py"], "approach": "Add /stats command to bot_commands.py that calls list_tasks() and formats a summary."}"""
 
 SYSTEM_PROMPT = """You are an expert software engineer.
 You will be given a test failure log and the relevant source code.
@@ -88,6 +104,15 @@ class ClaudeModel(BaseModel):
         )
         return msg.content[0].text
 
+    def plan_changes(self, request: str) -> dict:
+        msg = self._client.messages.create(
+            model=self._model,
+            max_tokens=512,
+            system=PLAN_PROMPT,
+            messages=[{"role": "user", "content": request}],
+        )
+        return json.loads(msg.content[0].text)
+
 
 class OpenAIModel(BaseModel):
     def __init__(self, api_key: str, model: str = "gpt-4o"):
@@ -133,6 +158,17 @@ class OpenAIModel(BaseModel):
             max_tokens=8192,
         )
         return resp.choices[0].message.content
+
+    def plan_changes(self, request: str) -> dict:
+        resp = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": PLAN_PROMPT},
+                {"role": "user", "content": request},
+            ],
+            max_tokens=512,
+        )
+        return json.loads(resp.choices[0].message.content)
 
 
 class LlamaCppModel(BaseModel):
@@ -180,6 +216,14 @@ class LlamaCppModel(BaseModel):
             max_tokens=8192, timeout=600
         )
 
+    def plan_changes(self, request: str) -> dict:
+        text = self._call(PLAN_PROMPT, request, max_tokens=512, timeout=60)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
 
 class OllamaModel(BaseModel):
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen2.5-coder:32b"):
@@ -224,6 +268,15 @@ class OllamaModel(BaseModel):
             f"## User Request\n{request}\n\n## Source code\n```\n{code_context}\n```",
             timeout=300
         )
+
+    def plan_changes(self, request: str) -> dict:
+        text = self._call(PLAN_PROMPT, request, timeout=60)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
 
 def get_model(cfg: dict) -> BaseModel:
     choice = cfg["agent"]["model"]

@@ -164,6 +164,14 @@ def process_pending_task(model) -> bool:
         _step(task_id, "branch", f"🌿 브랜치 생성 완료: <code>{branch}</code>")
 
         # ── 2. AI 패치 생성 ─────────────────────────────────────────────
+        # TODO: Phase 2 Step 1 — plan→execute 2단계 분리
+        #   plan = model.plan_changes(description)
+        #   _step(task_id, "planning", f"🗺 계획 수립: {plan.get('approach', '')[:80]}")
+        #   code_context = select_context(plan, WORK_DIR, _is_protected)
+        # TODO: Phase 2 Step 2 — context_selector 심볼 분석 기반으로 개선
+        # TODO: Phase 2 Step 3 — PR 기반 워크플로우 (머지 자동화 대신 PR 생성)
+        # TODO: Phase 2 Step 4 — 커밋 분할 (논리적 단위별 atomic commit)
+        # TODO: Phase 2 Step 5 — tests/suites/ 자동 테스트 스위트
         _step(task_id, "generating", f"🤖 AI 코드 생성 중...\n<code>{task_id}</code>")
         code_context = get_code_context()
         patch = model.generate_patch(description, code_context)
