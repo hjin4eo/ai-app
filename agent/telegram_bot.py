@@ -90,30 +90,44 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _auth(update):
         return
     text = (
-        "🤖 <b>ai-worker Telegram 봇</b>\n\n"
-        "<b>일반</b>\n"
+        "🤖 <b>ai-worker 개발해봇</b>\n\n"
+
+        "💬 <b>AI 대화</b>\n"
         "  일반 메시지 → AI 자동 답변\n"
         "  /search &lt;검색어&gt; — 웹 검색 + AI 요약\n"
         "  /ask &lt;질문&gt; — RAG 지식 검색\n"
-        "  /roadmap — AI 정보 자동화 로드맵\n\n"
-        "<b>시스템</b>\n"
+        "  /clip &lt;URL&gt; — URL 클리핑 → 지식 저장\n"
+        "  /clear — 대화 기록 초기화\n\n"
+
+        "🛠 <b>AI 태스크 (개발 자동화)</b>\n"
+        "  /task &lt;작업 설명&gt; — AI에게 개발 작업 요청\n"
+        "  /task status — 전체 태스크 현황\n"
+        "  /task status &lt;id&gt; — 특정 태스크 상세\n"
+        "  /task cancel &lt;id&gt; — 태스크 취소\n\n"
+
+        "🔀 <b>Git / 브랜치</b>\n"
+        "  /ci_status — 최근 CI 실행 결과\n"
+        "  /loop_status — AI 루프 실행 상태\n\n"
+
+        "🖥 <b>시스템</b>\n"
         "  /status — 서버 상태 (CPU/RAM/GPU)\n"
         "  /ps — 프로세스 목록\n"
-        "  /sh &lt;명령&gt; — 셸 명령 실행 (관리자)\n\n"
-        "<b>서비스</b>\n"
-        "  /service &lt;이름&gt; &lt;start|stop|restart&gt; (관리자)\n"
-        "  /weather_sync — 날씨 동기화\n\n"
-        "<b>관리</b>\n"
-        "  /allow &lt;chat_id&gt; — 사용자 허용 (관리자)\n"
-        "  /deny &lt;chat_id&gt; — 사용자 차단 (관리자)\n"
-        "  /users — 허용 목록 (관리자)\n"
+        "  /sh &lt;명령&gt; — 셸 명령 실행 (관리자)\n"
+        "  /service &lt;이름&gt; &lt;start|stop|restart&gt; — 서비스 제어 (관리자)\n\n"
+
+        "📚 <b>지식 관리</b>\n"
+        "  /reinforce — 00_Raw → 10_Wiki 구조화\n"
+        "  /reindex — ChromaDB 전체 재인덱싱 (관리자)\n"
         "  /index — RAG 인덱스 갱신 (관리자)\n"
-        "  /reinforce — 지식 강화 파이프라인\n"
-        "  /reindex — ChromaDB 초기화 + 전체 재인덱싱 (관리자)\n"
         "  /stats — 위키 현황 통계\n"
-        "  /lint — 위키 건강 점검\n"
-        "  /clear — 대화 기록 초기화\n"
-        "  /switch [lm|ollama] — 모델 백엔드 전환 (관리자)\n"
+        "  /lint — 위키 건강 점검\n\n"
+
+        "⚙️ <b>설정 (관리자)</b>\n"
+        "  /switch [lm|ollama] — 모델 백엔드 전환\n"
+        "  /allow &lt;chat_id&gt; — 사용자 허용\n"
+        "  /deny &lt;chat_id&gt; — 사용자 차단\n"
+        "  /users — 허용 목록\n"
+        "  /weather_sync — 날씨 동기화\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
