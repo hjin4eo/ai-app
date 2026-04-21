@@ -324,7 +324,21 @@ def main():
         log.error("LOG_TELEGRAM_BOT_TOKEN 없음")
         sys.exit(1)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    COMMANDS = [
+        BotCommand("help", "명령어 안내"),
+        BotCommand("task", "AI 태스크 등록·조회·취소"),
+        BotCommand("merge", "태스크 브랜치 master 머지"),
+        BotCommand("reject", "태스크 브랜치 삭제"),
+        BotCommand("diff", "태스크 변경사항 보기"),
+        BotCommand("ci_status", "최근 CI 실행 결과"),
+        BotCommand("loop_status", "AI 루프 상태"),
+        BotCommand("log", "loop.log 확인"),
+    ]
+
+    async def post_init(application):
+        await application.bot.set_my_commands(COMMANDS)
+
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", cmd_help))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -335,20 +349,6 @@ def main():
     app.add_handler(CommandHandler("ci_status", cmd_ci_status))
     app.add_handler(CommandHandler("loop_status", cmd_loop_status))
     app.add_handler(CommandHandler("log", cmd_log))
-
-    async def post_init(application):
-        await application.bot.set_my_commands([
-            BotCommand("help", "명령어 안내"),
-            BotCommand("task", "AI 태스크 등록·조회·취소"),
-            BotCommand("merge", "태스크 브랜치 master 머지"),
-            BotCommand("reject", "태스크 브랜치 삭제"),
-            BotCommand("diff", "태스크 변경사항 보기"),
-            BotCommand("ci_status", "최근 CI 실행 결과"),
-            BotCommand("loop_status", "AI 루프 상태"),
-            BotCommand("log", "loop.log 확인"),
-        ])
-
-    app.post_init = post_init
 
     log.info("개발해봇 시작")
     app.run_polling(drop_pending_updates=True)
