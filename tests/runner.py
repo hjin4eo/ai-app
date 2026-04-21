@@ -5,6 +5,7 @@ Playwright headed 테스트 실행기.
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from datetime import datetime
@@ -37,9 +38,10 @@ def run_tests(page: Page) -> None:
 
 def main() -> int:
     with sync_playwright() as pw:
+        headless = os.environ.get("HEADLESS", "0") == "1"
         browser = pw.chromium.launch(
-            headless=False,       # headed 모드
-            slow_mo=500,
+            headless=headless,
+            slow_mo=0 if headless else 500,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         context = browser.new_context(

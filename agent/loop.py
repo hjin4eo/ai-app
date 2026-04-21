@@ -57,6 +57,36 @@ def _is_protected(path: Path) -> bool:
     return False
 
 
+def _notify_photo(image_path: str, caption: str) -> None:
+    """Telegram으로 이미지(스크린샷) 전송."""
+    try:
+        import urllib.request, urllib.parse, json as _json
+        token = os.environ.get("LOG_TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.environ.get("LOG_TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID", "")
+        if not token or not chat_id or not Path(image_path).exists():
+            return
+        boundary = "----boundary"
+        with open(image_path, "rb") as f:
+            img_data = f.read()
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="photo"; filename="screenshot.png"\r\n'
+            f"Content-Type: image/png\r\n\r\n"
+        ).encode() + img_data + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        log.warning("Telegram 사진 전송 실패: %s", e)
+
+
 def _notify(text: str) -> None:
     """Telegram으로 상태 알림 (선택적 — 환경변수 없으면 로그만)."""
     try:
@@ -206,9 +236,6 @@ def process_pending_task(model, repo=None) -> bool:
 
         _step(task_id, "generating", f"🤖 AI 코드 생성 중...\n<code>{task_id}</code>")
         patch = model.generate_patch(description, code_context)
-        # TODO: Phase 2 Step 3 — PR 기반 워크플로우 (머지 자동화 대신 PR 생성)
-        # TODO: Phase 2 Step 4 — 커밋 분할 (논리적 단위별 atomic commit)
-        # TODO: Phase 2 Step 5 — tests/suites/ 자동 테스트 스위트
 
         if not patch.strip():
             update_task(task_id, status="failed", result="AI가 패치를 반환하지 않았습니다.")
@@ -252,7 +279,35 @@ def process_pending_task(model, repo=None) -> bool:
                     _notify(f"❌ <b>태스크 최대 재시도 초과</b>\n<code>{task_id}</code>")
                 return True
 
-        # ── 4. 커밋 & Push (Phase 2 Step 4: 논리 단위별 분할 커밋) ────────
+        # ── 4. 자동 테스트 검수 (Phase 2 Step 5) ────────────────────────
+        _step(task_id, "testing", f"🧪 테스트 실행 중...\n<code>{task_id}</code>")
+        passed, screenshot, test_output = _run_tests(task_id)
+        if not passed:
+            caption = f"❌ 테스트 실패 [{task_id}]\n{test_output[-200:]}"
+            if screenshot:
+                _notify_photo(screenshot, caption)
+            else:
+                _notify(f"❌ <b>테스트 실패</b>\n<code>{task_id}</code>\n<pre>{test_output[-300:]}</pre>")
+
+            if retries < MAX_RETRIES - 1:
+                update_task(task_id, status="pending", retries=retries + 1)
+                _git(["checkout", "master"], check=False)
+                delete_branch(branch)
+                _notify(
+                    f"⚠️ <b>테스트 실패 — 재시도 예약</b> ({retries + 1}/{MAX_RETRIES})\n"
+                    f"<code>{task_id}</code>"
+                )
+            else:
+                update_task(task_id, status="failed",
+                            result=f"테스트 {MAX_RETRIES}회 실패: {test_output[-100:]}")
+                _git(["checkout", "master"], check=False)
+                delete_branch(branch)
+                _notify(f"❌ <b>테스트 최대 재시도 초과</b>\n<code>{task_id}</code>")
+            return True
+
+        _step(task_id, "test_pass", f"✅ 테스트 통과\n<code>{task_id}</code>")
+
+        # ── 5. 커밋 & Push (Phase 2 Step 4: 논리 단위별 분할 커밋) ────────
         _step(task_id, "pushing",
               f"⬆️ 커밋 & Push 중...\n<code>{branch}</code>")
         ok, err = commit_in_groups(task_id, description, branch)
@@ -494,6 +549,47 @@ def commit_in_groups(task_id: str, description: str, branch: str) -> tuple[bool,
     if r.returncode != 0:
         return False, f"push 실패: {r.stderr.strip()[:200]}"
     return True, ""
+
+
+def _run_tests(task_id: str) -> tuple[bool, str, str]:
+    """tests/runner.py 실행 후 (통과여부, 스크린샷경로, 출력) 반환.
+
+    HEADLESS=1 환경변수로 headless 모드 강제.
+    tests/runner.py 없으면 스킵(통과로 처리).
+    """
+    runner = WORK_DIR / "tests" / "runner.py"
+    if not runner.exists():
+        log.info("tests/runner.py 없음 — 테스트 스킵")
+        return True, "", "테스트 파일 없음 (스킵)"
+
+    python = Path(sys.executable)
+    env = os.environ.copy()
+    env["HEADLESS"] = "1"
+    env["PYTHONPATH"] = str(WORK_DIR)
+
+    try:
+        r = subprocess.run(
+            [str(python), str(runner)],
+            cwd=WORK_DIR,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        output = (r.stdout + r.stderr).strip()[-1000:]
+        passed = r.returncode == 0
+
+        # 실패 스크린샷 경로 추출 ([SCREENSHOT] /tmp/... 형식)
+        screenshot = ""
+        for line in (r.stdout + r.stderr).splitlines():
+            if line.startswith("[SCREENSHOT]"):
+                screenshot = line.split("]", 1)[-1].strip()
+
+        return passed, screenshot, output
+    except subprocess.TimeoutExpired:
+        return False, "", "테스트 타임아웃 (120s 초과)"
+    except Exception as e:
+        return False, "", f"테스트 실행 오류: {e}"
 
 
 def cancel_run(run) -> None:
