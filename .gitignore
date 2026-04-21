@@ -1,4 +1,5 @@
 venv/
+.env
 .claude/
 .gemini/
 .antigravity-server/
