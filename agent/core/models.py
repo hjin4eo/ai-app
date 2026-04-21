@@ -22,6 +22,17 @@ class BaseModel(abc.ABC):
         """사용자 요청과 코드 컨텍스트를 받아 Unified Diff 패치를 반환."""
 
     @abc.abstractmethod
+    def decompose_task(self, request: str) -> dict:
+        """Phase 4: 복잡한 태스크를 서브태스크로 분해.
+
+        Returns:
+            {
+              "is_complex": bool,
+              "subtasks": ["구체적 서브태스크 설명", ...]  # is_complex=False면 빈 리스트
+            }
+        """
+
+    @abc.abstractmethod
     def plan_changes(self, request: str) -> dict:
         """Phase 2: 실행 전 계획 수립.
 
@@ -42,6 +53,25 @@ class BaseModel(abc.ABC):
             }
         """
 
+
+DECOMPOSE_PROMPT = """You are a senior software engineer breaking down a development task.
+Analyze the task description and decide if it is too large or vague to implement in one step.
+
+A task is complex if it:
+- Requires creating or modifying more than 3 files
+- Describes a system/feature rather than a specific implementation
+- Contains multiple independent features
+
+If complex, break it into 2-5 specific, actionable subtasks. Each subtask must:
+- Name the specific file(s) to create or modify
+- Describe exactly one function/class/command to implement
+- Specify inputs and outputs
+
+Return ONLY valid JSON:
+{"is_complex": true, "subtasks": ["agent/services/scraper.py 만들어줘. WebScraper 클래스, scrape(url) → str 반환.", "bot_commands.py에 /scrape <url> 명령어 추가. WebScraper 호출 후 결과 텔레그램 응답."]}
+
+If the task is already specific enough for one implementation step:
+{"is_complex": false, "subtasks": []}"""
 
 REVIEW_PROMPT = """You are a senior software engineer reviewing AI-generated code.
 You will be given a task description and a git diff of the changes made.
@@ -128,6 +158,15 @@ class ClaudeModel(BaseModel):
         )
         return msg.content[0].text
 
+    def decompose_task(self, request: str) -> dict:
+        msg = self._client.messages.create(
+            model=self._model,
+            max_tokens=1024,
+            system=DECOMPOSE_PROMPT,
+            messages=[{"role": "user", "content": request}],
+        )
+        return json.loads(msg.content[0].text)
+
     def plan_changes(self, request: str) -> dict:
         msg = self._client.messages.create(
             model=self._model,
@@ -191,6 +230,17 @@ class OpenAIModel(BaseModel):
             max_tokens=8192,
         )
         return resp.choices[0].message.content
+
+    def decompose_task(self, request: str) -> dict:
+        resp = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": DECOMPOSE_PROMPT},
+                {"role": "user", "content": request},
+            ],
+            max_tokens=1024,
+        )
+        return json.loads(resp.choices[0].message.content)
 
     def plan_changes(self, request: str) -> dict:
         resp = self._client.chat.completions.create(

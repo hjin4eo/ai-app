@@ -345,7 +345,7 @@ async def cmd_build(ctx, *, request: str):
         return
     async with ctx.typing():
         def run_handler():
-            sys.path.insert(0, str(Path(__file__).parent))
+            sys.path.insert(0, str(Path(__file__).parent / "scripts"))
             from request_handler import handle_request
             return handle_request(request)
         loop = asyncio.get_event_loop()
