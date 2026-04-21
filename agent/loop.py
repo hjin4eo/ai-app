@@ -140,7 +140,31 @@ def delete_branch(branch: str) -> None:
     _git(["push", "origin", "--delete", branch], check=False)
 
 
-def process_pending_task(model) -> bool:
+def _create_pr(repo, task_id: str, branch: str, description: str, plan: dict) -> str:
+    """GitHub PR 생성 후 PR URL 반환. 실패 시 빈 문자열."""
+    try:
+        approach = plan.get("approach", "")
+        files = plan.get("files", [])
+        body_lines = [f"## 태스크 `{task_id}`\n"]
+        if approach:
+            body_lines.append(f"### 구현 방향\n{approach}\n")
+        if files:
+            body_lines.append("### 관련 파일\n" + "\n".join(f"- `{f}`" for f in files))
+        body_lines.append("\n---\n🤖 AI 자동 생성 — `/merge {id}` 로 승인, `/reject {id}` 로 거부".replace("{id}", task_id))
+        pr = repo.create_pull(
+            title=f"[AI] {description[:72]}",
+            body="\n".join(body_lines),
+            head=branch,
+            base="master",
+        )
+        log.info("PR 생성: %s", pr.html_url)
+        return pr.html_url
+    except Exception as e:
+        log.warning("PR 생성 실패: %s", e)
+        return ""
+
+
+def process_pending_task(model, repo=None) -> bool:
     """대기 중인 태스크 1개를 처리. 처리했으면 True 반환."""
     task = pop_next_pending()
     if not task:
@@ -233,12 +257,36 @@ def process_pending_task(model) -> bool:
         msg = f"feat: AI 태스크 {task_id} — {description[:60]}"
         ok, err = commit_and_push(msg, branch=branch)
         if ok:
-            update_task(task_id, status="completed", result=f"브랜치 {branch} push 완료")
-            _notify(
-                f"✅ <b>태스크 완료</b>\n"
-                f"<code>{task_id}</code>: {description[:60]}\n"
-                f"🌿 <code>{branch}</code>"
-            )
+            # ── 5. PR 생성 (Phase 2 Step 3) ──────────────────────────────
+            pr_url = ""
+            if repo is not None:
+                pr_url = _create_pr(repo, task_id, branch, description,
+                                    plan if "plan" in dir() else {})
+                if pr_url:
+                    update_task(task_id, status="completed",
+                                result=f"브랜치 {branch} push 완료", pr_url=pr_url)
+                    _notify(
+                        f"✅ <b>태스크 완료 — PR 생성됨</b>\n"
+                        f"<code>{task_id}</code>: {description[:60]}\n"
+                        f"🌿 <code>{branch}</code>\n"
+                        f"🔗 {pr_url}\n\n"
+                        f"👉 <code>/merge {task_id}</code> 로 승인"
+                    )
+                else:
+                    update_task(task_id, status="completed",
+                                result=f"브랜치 {branch} push 완료 (PR 생성 실패)")
+                    _notify(
+                        f"✅ <b>태스크 완료</b> (PR 생성 실패)\n"
+                        f"<code>{task_id}</code>: {description[:60]}\n"
+                        f"🌿 <code>{branch}</code>"
+                    )
+            else:
+                update_task(task_id, status="completed", result=f"브랜치 {branch} push 완료")
+                _notify(
+                    f"✅ <b>태스크 완료</b>\n"
+                    f"<code>{task_id}</code>: {description[:60]}\n"
+                    f"🌿 <code>{branch}</code>"
+                )
             _notify_diff(task_id, branch)
         else:
             update_task(task_id, status="failed", result=err)
@@ -409,7 +457,7 @@ def main():
 
             # ── 우선순위 2: 채팅 태스크 큐 처리 ─────────────────────────
             try:
-                process_pending_task(model)
+                process_pending_task(model, repo)
             except Exception as e:
                 log.error("태스크 큐 처리 오류 (Priority 2): %s", e)
 

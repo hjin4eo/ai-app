@@ -74,11 +74,13 @@ async def cmd_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not task:
                 await update.message.reply_text(f"태스크 <code>{args[1]}</code> 없음", parse_mode="HTML")
                 return
+            pr_line = f"\n🔗 {task['pr_url']}" if task.get("pr_url") else ""
             await update.message.reply_text(
                 f"🆔 <code>{task['id']}</code>\n"
                 f"📌 상태: <b>{task['status']}</b>\n"
                 f"📝 {task['description'][:100]}\n"
-                f"🌿 <code>{task.get('branch', '-')}</code>\n"
+                f"🌿 <code>{task.get('branch', '-')}</code>"
+                f"{pr_line}\n"
                 f"🔁 재시도: {task.get('retries', 0)}\n"
                 f"📄 {task.get('result', '')[:200]}",
                 parse_mode="HTML"
@@ -157,10 +159,38 @@ async def cmd_merge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     task_id = context.args[0]
     task = get_task(task_id)
     branch = f"ai/task-{task_id}" if not task else task.get("branch", f"ai/task-{task_id}")
+    pr_url = task.get("pr_url", "") if task else ""
 
     msg = await update.message.reply_text(f"🔀 <code>{branch}</code> → master 머지 중...", parse_mode="HTML")
 
     def do_merge():
+        # PR URL이 있으면 GitHub API로 PR 머지 (squash)
+        if pr_url:
+            try:
+                from github import Github
+                token = os.environ.get("GITHUB_TOKEN", "")
+                repo_name = CFG.get("github", {}).get("repo", "")
+                gh = Github(token)
+                repo = gh.get_repo(repo_name)
+                pr_number = int(pr_url.rstrip("/").split("/")[-1])
+                pr = repo.get_pull(pr_number)
+                if pr.is_merged():
+                    return True, "이미 머지됨"
+                result = pr.merge(
+                    commit_title=f"feat: 태스크 {task_id} 승인",
+                    commit_message=pr.body or "",
+                    merge_method="squash",
+                )
+                if result.merged:
+                    # 로컬 + 원격 브랜치 정리
+                    _git(["branch", "-D", branch])
+                    _git(["push", "origin", "--delete", branch])
+                    return True, ""
+                return False, result.message
+            except Exception as e:
+                return False, f"PR 머지 실패: {e}"
+
+        # PR 없으면 git 직접 머지 (fallback)
         _git(["checkout", "master"])
         _git(["pull", "--ff-only"])
         r = _git(["merge", "--no-ff", branch, "-m", f"merge: 태스크 {task_id} 승인 머지"])
@@ -177,7 +207,11 @@ async def cmd_merge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ok, err = await loop.run_in_executor(None, do_merge)
 
     if ok:
-        await msg.edit_text(f"✅ <b>머지 완료</b>\n<code>{branch}</code> → master", parse_mode="HTML")
+        detail = f"\n🔗 {pr_url}" if pr_url else ""
+        await msg.edit_text(
+            f"✅ <b>머지 완료</b>\n<code>{branch}</code> → master{detail}",
+            parse_mode="HTML"
+        )
     else:
         await msg.edit_text(f"❌ <b>머지 실패</b>\n<code>{err}</code>", parse_mode="HTML")
 
@@ -218,7 +252,9 @@ async def cmd_diff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     task_id = context.args[0]
-    branch = f"ai/task-{task_id}"
+    task = get_task(task_id)
+    branch = f"ai/task-{task_id}" if not task else task.get("branch", f"ai/task-{task_id}")
+    pr_url = task.get("pr_url", "") if task else ""
 
     def get_diff():
         stat = _git(["diff", f"master..{branch}", "--stat"])
@@ -253,6 +289,8 @@ async def cmd_diff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     summary = stat.splitlines()[-1] if stat else ""
     if summary:
         lines.append(f"\n📊 {summary}")
+    if pr_url:
+        lines.append(f"\n🔗 {pr_url}")
 
     await update.message.reply_text("\n\n".join(lines), parse_mode="HTML")
 
