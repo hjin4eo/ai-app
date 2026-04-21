@@ -22,6 +22,7 @@ if str(_agent_dir) not in sys.path:
     sys.path.append(str(_agent_dir))
 
 from core.bot_config import CFG
+from core.context_selector import select_context
 from core.models import get_model
 from core.task_queue import pop_next_pending, update_task, list_tasks
 
@@ -163,18 +164,26 @@ def process_pending_task(model) -> bool:
         _git(["checkout", "-b", branch])
         _step(task_id, "branch", f"🌿 브랜치 생성 완료: <code>{branch}</code>")
 
-        # ── 2. AI 패치 생성 ─────────────────────────────────────────────
-        # TODO: Phase 2 Step 1 — plan→execute 2단계 분리
-        #   plan = model.plan_changes(description)
-        #   _step(task_id, "planning", f"🗺 계획 수립: {plan.get('approach', '')[:80]}")
-        #   code_context = select_context(plan, WORK_DIR, _is_protected)
-        # TODO: Phase 2 Step 2 — context_selector 심볼 분석 기반으로 개선
+        # ── 2. AI 패치 생성 (Phase 2: plan→execute 2단계) ───────────────
+        # Phase 2 Step 1+2: 계획 수립 → import 그래프 기반 컨텍스트 선택
+        _step(task_id, "planning", f"🗺 계획 수립 중...\n<code>{task_id}</code>")
+        try:
+            plan = model.plan_changes(description)
+            approach = plan.get("approach", "")[:80]
+            plan_files = plan.get("files", [])
+            _step(task_id, "planned",
+                  f"📋 계획: {approach}\n파일: {', '.join(plan_files[:3])}"
+                  + (f" 외 {len(plan_files)-3}개" if len(plan_files) > 3 else ""))
+            code_context = select_context(plan, WORK_DIR, _is_protected)
+        except Exception as e:
+            log.warning("계획 수립 실패, 전체 스캔으로 폴백: %s", e)
+            code_context = get_code_context()
+
+        _step(task_id, "generating", f"🤖 AI 코드 생성 중...\n<code>{task_id}</code>")
+        patch = model.generate_patch(description, code_context)
         # TODO: Phase 2 Step 3 — PR 기반 워크플로우 (머지 자동화 대신 PR 생성)
         # TODO: Phase 2 Step 4 — 커밋 분할 (논리적 단위별 atomic commit)
         # TODO: Phase 2 Step 5 — tests/suites/ 자동 테스트 스위트
-        _step(task_id, "generating", f"🤖 AI 코드 생성 중...\n<code>{task_id}</code>")
-        code_context = get_code_context()
-        patch = model.generate_patch(description, code_context)
 
         if not patch.strip():
             update_task(task_id, status="failed", result="AI가 패치를 반환하지 않았습니다.")
