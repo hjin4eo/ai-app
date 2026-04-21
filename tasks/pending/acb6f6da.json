@@ -1,0 +1,11 @@
+{
+  "id": "acb6f6da",
+  "status": "pending",
+  "created": "2026-04-21T21:43:08.514445",
+  "source": "decomposed:9f1e2b6c",
+  "description": "agent/services/monitor.py 파일에 LinkMonitor 클래스를 정의하고, compare_links(new_links: List[str], historical_links: List[str]) 함수를 구현하여 새로운 링크만 필터링하여 반환하도록 합니다.",
+  "branch": "ai/task-acb6f6da",
+  "retries": 0,
+  "result": null,
+  "parent_id": "9f1e2b6c"
+}

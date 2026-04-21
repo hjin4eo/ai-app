@@ -1,0 +1,11 @@
+{
+  "id": "aabc7a50",
+  "status": "pending",
+  "created": "2026-04-21T21:43:08.514834",
+  "source": "decomposed:9f1e2b6c",
+  "description": "agent/handlers/telegram_notifier.py 파일에 send_notification(links: List[str]) 함수를 구현하여, 전달받은 링크 리스트를 지정된 텔레그램 채널에 메시지로 전송합니다.",
+  "branch": "ai/task-aabc7a50",
+  "retries": 0,
+  "result": null,
+  "parent_id": "9f1e2b6c"
+}

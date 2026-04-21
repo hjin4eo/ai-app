@@ -1,0 +1,11 @@
+{
+  "id": "a8cc1e32",
+  "status": "pending",
+  "created": "2026-04-21T21:43:08.513924",
+  "source": "decomposed:9f1e2b6c",
+  "description": "agent/services/scraper.py 파일에 WebScraper 클래스를 정의하고, scrape_links(url: str) 함수를 구현하여 주어진 URL의 모든 새 글 링크 리스트(List[str])를 반환하도록 합니다.",
+  "branch": "ai/task-a8cc1e32",
+  "retries": 0,
+  "result": null,
+  "parent_id": "9f1e2b6c"
+}

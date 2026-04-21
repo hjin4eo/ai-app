@@ -1,0 +1,11 @@
+{
+  "id": "7ed9d6e7",
+  "status": "failed",
+  "created": "2026-04-21T20:47:41.572721",
+  "source": "decomposed:2f1a119e",
+  "description": "agent/services/scraper.py 파일을 생성하고, 외부 URL을 크롤링하여 HTML/텍스트를 반환하는 WebScraper 클래스와 scrape(url: str) 메서드를 구현합니다.",
+  "branch": "ai/task-7ed9d6e7",
+  "retries": 4,
+  "result": "패치/폴백 5회 실패: Expecting ',' delimiter: line 2 column 1022 (char 1023)",
+  "parent_id": "2f1a119e"
+}

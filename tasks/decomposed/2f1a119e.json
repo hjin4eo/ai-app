@@ -1,0 +1,10 @@
+{
+  "id": "2f1a119e",
+  "status": "decomposed",
+  "created": "2026-04-21T20:47:14.769097",
+  "source": "dev_bot",
+  "description": "프롬프트 A: [시스템 설계 문서] (개발자, 내부 AI Context용) 목적: 시스템이 이 복잡한 아키텍처를 이해하고, 향후 기능을 개발할 때 이 규칙을 절대 어기지 않도록 지시할 때 사용합니다. (가장 기술적이고 상세함) markdown 🤖 시스템 아키텍처 설계 지침: AI 지식 자동 큐레이션 파이프라인 🎯 최고 우선순위 (CORE PRINCIPLES) 1. 자동화 우선: 모든 기능은 수동 요청(Manual Trigger) 대신 이벤트 기반 자동화(Automated Loop)를 목표로 한다. 2. 안전성/통제권: 신규 모듈은 기존 핵심 서비스(rag_manager.py)의 동작에 최소한의 침습적 변화(Minimal Invasive Change)만을 가하며, 외부 데이터 유입 시에도 내부망 규칙(00_Raw/ 보관)을 철저히 준수해야 한다. 3. Reinforce 원칙 유지: 데이터를 '지식'으로 만드는 핵심 로직인 reinforce.py의 기본 동작 방식은 변경하지 않고, 데이터 '입력 경로'만 확장한다. ⚙️ 시스템 구조 통합 매트릭스 | 단계 | 기존 프로세스 (RAG) | 신규 프로세스 (AI Curation) | 통합 지점 | | :--- | :--- | :--- | :--- | | 1. 데이터 수집 | (사용자 질문 기반) | [NEW] Scraper (외부 URL 크롤링) | config.yaml 정의 | | 2. 원본 저장 | (봇 검색 결과) | 00_Raw/AI_Curation/에 원본 저장 | ➡️ 00_Raw/ 확장 | | 3. 지식 변환 | reinforce.py 실행 | reinforce.py 자동 감지 & 실행 | ✅ 기존 Reinforce 엔진 활용 | | 4. 지식 저장 | 10_Wiki/concepts/ | 10_Wiki/synthesis/에 요약 저장 | ➡️ 10_Wiki/ 카테고리 추가 | | 5. 인덱싱 | ChromaDB 업데이트 | ChromaDB + Graph.json 자동 업데이트 | ✅ 기존 RAG Manager 담당 | 🗺 개발 로드맵 (MVP & Iteration) 🥇 MVP (1단계): Scraper 구현 및 00_Raw/AI_Curation/ 원본 저장 자동화. (목표: 정보 수집) 🥈 Core (2단계): reinforce.py 확장 및 LLM을 사용한 구조화된 요약/지식 통합. (목표: 정보 가치화) 🥉 Scaling (3단계): 사용자 알림/브리핑 기능 추가 및 성능 튜닝. (목표: 사용자 경험 최적화)",
+  "branch": "ai/task-2f1a119e",
+  "retries": 0,
+  "result": "서브태스크 4개로 분해: b7444be4, 7ed9d6e7, 6d323472, 439d1a9e"
+}

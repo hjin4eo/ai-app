@@ -1,0 +1,10 @@
+{
+  "id": "9f1e2b6c",
+  "status": "decomposed",
+  "created": "2026-04-21T21:42:26.226584",
+  "source": "dev_bot",
+  "description": "하루에 2번 https://deepmind.google/blog/ 랑 https://ai.meta.com/blog/에 새로운글 올라오면 링크 보내줘",
+  "branch": "ai/task-9f1e2b6c",
+  "retries": 0,
+  "result": "서브태스크 4개로 분해: a8cc1e32, acb6f6da, aabc7a50, 93d3fb72"
+}

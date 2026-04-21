@@ -1,0 +1,11 @@
+{
+  "id": "b7444be4",
+  "status": "failed",
+  "created": "2026-04-21T20:47:41.572099",
+  "source": "decomposed:2f1a119e",
+  "description": "config.yaml에 자동 큐레이션 파이프라인을 위한 Scraper 입력 소스를 정의하고 구성 설정을 추가합니다.",
+  "branch": "ai/task-b7444be4",
+  "retries": 4,
+  "result": "테스트 5회 실패: lement[0],\n                                                            ^\nSyntaxError: invalid syntax",
+  "parent_id": "2f1a119e"
+}
