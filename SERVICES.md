@@ -6,7 +6,8 @@
 
 | 서비스 | 설명 | 실행 경로 | venv |
 |---|---|---|---|
-| `telegram-bot` | Telegram AI 봇 | `/home/home/ai-worker/agent/telegram_bot.py` | `/home/home/ai-worker/venv` |
+| `telegram-bot` | 알리미 — 일반 AI 챗봇 | `/home/home/ai-worker/agent/telegram_bot.py` | `/home/home/ai-worker/venv` |
+| `dev-bot` | 개발해봇 — 개발 워크플로우 전용 | `/home/home/ai-worker/agent/dev_bot.py` | `/home/home/ai-worker/venv` |
 | `discord-agent` | Discord AI 봇 | `/home/home/discord-agent/bot.py` | `/home/home/discord-agent/venv` |
 | `llama-cpp` | llama-cpp-python 서버 (비전 지원) | 모델: `/mnt/c/ollamamodels/gemma-4-E4B-it.Q8_0.gguf` | `/home/home/llama-env` |
 | `nanoclaw-monitor` | 서버 모니터 (Discord+Telegram) | `/home/home/server-monitor/monitor.py` | `/home/home/server-monitor/venv` |
@@ -17,6 +18,7 @@
 
 모두 `/etc/systemd/system/` 아래:
 - `telegram-bot.service`
+- `dev-bot.service`
 - `discord-agent.service`
 - `llama-cpp.service`
 - `nanoclaw-monitor.service`
