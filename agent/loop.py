@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import defaultdict
 from pathlib import Path
 
 import yaml
@@ -251,11 +252,10 @@ def process_pending_task(model, repo=None) -> bool:
                     _notify(f"❌ <b>태스크 최대 재시도 초과</b>\n<code>{task_id}</code>")
                 return True
 
-        # ── 4. 커밋 & Push ───────────────────────────────────────────────
+        # ── 4. 커밋 & Push (Phase 2 Step 4: 논리 단위별 분할 커밋) ────────
         _step(task_id, "pushing",
               f"⬆️ 커밋 & Push 중...\n<code>{branch}</code>")
-        msg = f"feat: AI 태스크 {task_id} — {description[:60]}"
-        ok, err = commit_and_push(msg, branch=branch)
+        ok, err = commit_in_groups(task_id, description, branch)
         if ok:
             # ── 5. PR 생성 (Phase 2 Step 3) ──────────────────────────────
             pr_url = ""
@@ -396,6 +396,104 @@ def commit_and_push(message: str, branch: str = None) -> tuple[bool, str]:
         err = (e.stderr or str(e))[:200]
         log.error("commit/push 실패: %s", err)
         return False, err
+
+
+def _commit_type(rel_path: str) -> tuple[str, str]:
+    """파일 경로 → (커밋 타입, 스코프) 추론.
+
+    예) "agent/handlers/bot_commands.py" → ("feat", "handlers")
+        "tests/test_api.py"             → ("test", "tests")
+        "README.md"                     → ("docs", "docs")
+    """
+    p = Path(rel_path)
+    parts = p.parts
+    stem = p.stem.lower()
+
+    if not parts:
+        return "chore", "misc"
+    if "test" in stem or parts[0] == "tests":
+        return "test", "tests"
+    if p.suffix in (".md", ".rst", ".txt"):
+        return "docs", "docs"
+    if p.name in ("config.yaml", "pyproject.toml", "requirements.txt",
+                  "setup.py", "setup.cfg", ".env.example"):
+        return "config", p.stem
+    if parts[0] == "agent":
+        scope = parts[1] if len(parts) > 2 else "agent"
+        return "feat", scope
+    return "feat", parts[0]
+
+
+def commit_in_groups(task_id: str, description: str, branch: str) -> tuple[bool, str]:
+    """변경 파일을 논리 단위로 분할해 여러 커밋 생성 후 push.
+
+    흐름:
+    1. 전체 스테이징 해제 (unstage) → 워킹트리 기준으로 파일 목록 확보
+    2. 파일 경로별 (타입, 스코프) 그룹핑
+    3. 그룹별 git add + commit
+    4. 마지막에 한 번 push
+
+    단일 그룹이면 commit_and_push()와 동일 결과.
+    """
+    # 이미 스테이지된 파일도 unstage 해서 porcelain로 전체 파악
+    subprocess.run(["git", "reset", "HEAD"], cwd=WORK_DIR, capture_output=True)
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=WORK_DIR, capture_output=True, text=True
+    )
+    if not status.stdout.strip():
+        return False, "변경사항 없음 — AI가 코드를 수정하지 않았습니다."
+
+    # porcelain 출력: "XY path" 또는 "XY old -> new"
+    changed: list[str] = []
+    for line in status.stdout.splitlines():
+        raw = line[3:].strip()
+        path = raw.split(" -> ")[-1]  # rename 대응
+        if path:
+            changed.append(path)
+
+    groups: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for f in changed:
+        groups[_commit_type(f)].append(f)
+
+    short = description[:50]
+
+    # 그룹 1개면 단일 커밋
+    if len(groups) == 1:
+        (type_, scope), files = next(iter(groups.items()))
+        subprocess.run(["git", "add"] + files, cwd=WORK_DIR, capture_output=True)
+        r = subprocess.run(
+            ["git", "commit", "-m", f"{type_}({scope}): [{task_id}] {short}"],
+            cwd=WORK_DIR, capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            return False, f"commit 실패: {r.stderr.strip()[:200]}"
+    else:
+        # 여러 그룹: 각각 커밋
+        for (type_, scope), files in groups.items():
+            subprocess.run(["git", "add"] + files, cwd=WORK_DIR, capture_output=True)
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=WORK_DIR, capture_output=True, text=True
+            )
+            if not staged.stdout.strip():
+                continue
+            r = subprocess.run(
+                ["git", "commit", "-m", f"{type_}({scope}): [{task_id}] {short}"],
+                cwd=WORK_DIR, capture_output=True, text=True,
+            )
+            if r.returncode != 0 and "nothing to commit" not in r.stdout + r.stderr:
+                return False, f"commit 실패 ({scope}): {r.stderr.strip()[:150]}"
+
+        log.info("커밋 분할 완료: %d그룹", len(groups))
+
+    # push
+    r = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=WORK_DIR, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return False, f"push 실패: {r.stderr.strip()[:200]}"
+    return True, ""
 
 
 def cancel_run(run) -> None:
