@@ -1,6 +1,6 @@
 # ai-worker/agent 코드 인덱스
 
-> 최종 갱신: 2026-04-21 (개발해봇 분리, 보호 파일, diff 알림 추가)
+> 최종 갱신: 2026-04-21 (Phase 2 완료 — plan→execute, import 그래프, PR 자동화, 분할 커밋, 자동 검수)
 
 ---
 
@@ -16,6 +16,11 @@
 | **보호 파일 목록** | `loop.py`, `config.yaml` 등 핵심 파일은 AI 태스크가 수정 불가 (3중 차단) |
 | **diff 알림** | 태스크 완료 시 변경 파일 목록 + 통계를 텔레그램으로 자동 전송 |
 | **push 에러 상세화** | 실패 원인(commit 실패/push 실패/변경없음)을 텔레그램에 정확히 표시 |
+| **Phase 2 — plan→execute** | `plan_changes()` 로 관련 파일 + 구현 방향 먼저 결정 후 패치 생성 |
+| **Phase 2 — import 그래프** | `context_selector.py` — ast 파싱 BFS로 의존 파일 자동 발견 (최대 2hop) |
+| **Phase 2 — PR 자동화** | push 후 GitHub PR 자동 생성, `/merge`는 squash merge |
+| **Phase 2 — 분할 커밋** | 변경 파일을 타입/스코프별 atomic commit으로 자동 분리 |
+| **Phase 2 — 자동 검수** | 패치 적용 후 `tests/runner.py` 자동 실행, 실패 시 스크린샷 텔레그램 전송 |
 
 ---
 
@@ -57,25 +62,33 @@
 | `/loop_status` | AI 루프 실행 상태 |
 | `/log [n]` | loop.log 최근 n줄 (기본 30) |
 
-### AI 태스크 워크플로우
+### AI 태스크 워크플로우 (Phase 2)
 ```
 /task <작업 설명>
       │
       ▼
 loop.py 감지 (30초 폴링)
       │
-      ├─ ai/task-<id> 브랜치 생성
-      ├─ AI 코드 생성 (Ollama)
-      ├─ 패치 적용 (실패 시 전체 파일 재생성)
-      └─ 브랜치 push
+      ├─ 1. ai/task-<id> 브랜치 생성
+      ├─ 2. plan_changes() — 관련 파일 + 구현 방향 결정
+      ├─ 3. select_context() — import 그래프 BFS 컨텍스트 선택
+      ├─ 4. generate_patch() — AI 패치 생성
+      ├─ 5. apply_patch() — 적용 (실패 시 generate_code() 폴백)
+      ├─ 6. tests/runner.py 자동 검수 (HEADLESS=1)
+      │       ├─ 실패 → 스크린샷 텔레그램 전송 → 재시도
+      │       └─ 통과 ↓
+      ├─ 7. commit_in_groups() — 타입/스코프별 분할 커밋 + push
+      └─ 8. GitHub PR 자동 생성
             │
             ▼
-    📋 변경 내역 텔레그램 전송
+    ✅ PR URL + /merge 안내 텔레그램 전송
+    📋 변경 파일 목록 전송
             │
       ┌─────┴─────┐
       ▼           ▼
   /merge <id>  /reject <id>
-  master 머지   브랜치 삭제
+  PR squash    브랜치 삭제
+  머지 (API)
 ```
 
 ---
@@ -106,7 +119,8 @@ agent/
 │   ├── shared.py          ← 동기 버전 유틸 (493줄)
 │   ├── agent.py           ← 지식 순환 에이전트 (446줄)
 │   ├── context_manager.py ← DB 기반 대화 컨텍스트 관리 (198줄)
-│   ├── models.py          ← LLM 백엔드 추상화 (194줄) 🔒
+│   ├── models.py          ← LLM 백엔드 추상화 + plan_changes() 🔒
+│   ├── context_selector.py← import 그래프 BFS 컨텍스트 선택 (Phase 2)
 │   ├── task_queue.py      ← 파일시스템 기반 AI 태스크 큐 🔒
 │   └── recovery.py        ← 시작 시 복구/재시도 로직 (116줄)
 │
@@ -189,14 +203,22 @@ agent/
 | `context_manager_db` | 전역 싱글톤 인스턴스 |
 
 ### `models.py` — LLM 백엔드 추상화 🔒
-| 클래스 | 백엔드 |
-|--------|--------|
+| 클래스/함수 | 설명 |
+|------------|------|
 | `BaseModel` | 추상 기반 클래스 |
 | `ClaudeModel` | Anthropic API |
 | `OpenAIModel` | OpenAI API |
 | `LlamaCppModel` | LM Studio (OpenAI 호환) |
 | `OllamaModel` | Ollama |
 | `get_model(cfg)` | config 기반 백엔드 선택 |
+| `.plan_changes(request)` | Phase 2 — `{"files":[...], "approach":"..."}` 반환 |
+
+### `context_selector.py` — import 그래프 컨텍스트 선택 (Phase 2)
+| 함수 | 설명 |
+|------|------|
+| `select_context(plan, work_dir, protected_check)` | plan 파일 → BFS 관련 파일 → 스캔 순 컨텍스트 구성 |
+| `build_import_graph(work_dir, protected_check)` | ast 파싱으로 레포 내 Python import 그래프 빌드 |
+| `find_related(seed_files, graph, max_hop)` | BFS로 직접/간접 의존 파일 탐색 (기본 2hop) |
 
 ### `recovery.py` — 시작 시 복구
 | 항목 | 설명 |
@@ -287,6 +309,18 @@ agent/
 
 ### `telegram_notify.py` / `discord_notify.py` — 알림 발송
 텔레그램/디스코드로 텍스트·파일 발송. 봇 외부에서 단독 호출 가능.
+
+---
+
+## tests/ — 자동 검수 (Phase 2 Step 5)
+
+| 파일 | 설명 |
+|------|------|
+| `tests/runner.py` | Playwright 테스트 실행기. `HEADLESS=1` 시 headless 모드. 실패 시 `/tmp/test_fail_*.png` 스크린샷 |
+| `tests/suites/__init__.py` | 스위트 디렉토리 |
+| `tests/suites/smoke.py` | 기본 스모크 테스트 — 앱 응답 + 500 에러 여부 확인 |
+
+**loop.py 연동**: 패치 적용 후 `_run_tests()` 호출 → 실패 시 스크린샷 텔레그램 전송 + 재시도, 통과 시 커밋/PR 진행.
 
 ---
 
