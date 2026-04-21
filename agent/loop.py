@@ -295,6 +295,7 @@ def process_pending_task(model, repo=None) -> bool:
         _step(task_id, "testing", f"🧪 테스트 실행 중...\n<code>{task_id}</code>")
         passed, screenshot, test_output = _run_tests(task_id)
         if not passed:
+            log.warning("테스트 실패 [%s]:\n%s", task_id, test_output[-500:])
             caption = f"❌ 테스트 실패 [{task_id}]\n{test_output[-200:]}"
             if screenshot:
                 _notify_photo(screenshot, caption)
