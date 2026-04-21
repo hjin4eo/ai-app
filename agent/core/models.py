@@ -310,6 +310,14 @@ class LlamaCppModel(BaseModel):
             max_tokens=8192, timeout=600
         )
 
+    def decompose_task(self, request: str) -> dict:
+        text = self._call(DECOMPOSE_PROMPT, request, max_tokens=1024, timeout=120)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
     def plan_changes(self, request: str) -> dict:
         text = self._call(PLAN_PROMPT, request, max_tokens=512, timeout=60)
         if "```" in text:
@@ -374,6 +382,14 @@ class OllamaModel(BaseModel):
             f"## User Request\n{request}\n\n## Source code\n```\n{code_context}\n```",
             timeout=300
         )
+
+    def decompose_task(self, request: str) -> dict:
+        text = self._call(DECOMPOSE_PROMPT, request, timeout=120)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
 
     def plan_changes(self, request: str) -> dict:
         text = self._call(PLAN_PROMPT, request, timeout=60)

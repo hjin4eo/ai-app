@@ -25,7 +25,7 @@ if str(_agent_dir) not in sys.path:
 from core.bot_config import CFG
 from core.context_selector import select_context
 from core.models import get_model
-from core.task_queue import pop_next_pending, update_task, list_tasks
+from core.task_queue import pop_next_pending, update_task, list_tasks, create_task
 
 POLL_INTERVAL = int(CFG["github"]["poll_interval"])
 MAX_RETRIES = int(CFG["agent"]["max_retries"])
@@ -216,6 +216,13 @@ def process_pending_task(model, repo=None) -> bool:
           f"<code>{task_id}</code>: {description[:80]}")
 
     try:
+        # ── 0. 태스크 분해 (Phase 4) — child 태스크는 분해 안 함 ────────
+        is_child = task.get("source", "").startswith("decomposed:")
+        if not is_child and retries == 0:
+            children = _decompose_task(task_id, description, model)
+            if children:
+                return True  # 분해 완료 — 서브태스크가 큐에 등록됨
+
         # ── 1. 브랜치 생성 ──────────────────────────────────────────────
         _git(["checkout", "master"])
         _git(["pull", "--ff-only"], check=False)
@@ -366,6 +373,20 @@ def process_pending_task(model, repo=None) -> bool:
         else:
             update_task(task_id, status="failed", result=err)
             _notify(f"❌ <b>Push 실패</b>\n<code>{task_id}</code>\n<code>{err}</code>")
+
+        # 서브태스크 완료 시 부모 상태 확인
+        if is_child:
+            parent_id = task.get("parent_id", "")
+            if parent_id:
+                from core.task_queue import get_task, list_tasks as _lt
+                siblings = [t for t in _lt("completed") if t.get("parent_id") == parent_id]
+                parent = get_task(parent_id)
+                if parent:
+                    total_children = len(parent.get("result", "").split(",")) if parent.get("result") else 0
+                    if len(siblings) >= total_children:
+                        update_task(parent_id, status="completed",
+                                    result=f"서브태스크 {len(siblings)}개 모두 완료")
+                        _notify(f"✅ <b>전체 태스크 완료</b>\n<code>{parent_id}</code> — 서브태스크 {len(siblings)}개 완료")
 
         _git(["checkout", "master"], check=False)
 
@@ -569,6 +590,40 @@ def commit_in_groups(task_id: str, description: str, branch: str) -> tuple[bool,
     if r.returncode != 0:
         return False, f"push 실패: {r.stderr.strip()[:200]}"
     return True, ""
+
+
+def _decompose_task(task_id: str, description: str, model) -> list[str]:
+    """태스크가 복잡하면 서브태스크로 분해 후 큐에 등록. 서브태스크 ID 목록 반환.
+
+    부모 태스크가 있는 경우(child) 분해 안 함 — 무한 분해 방지.
+    """
+    try:
+        result = model.decompose_task(description)
+        if not result.get("is_complex"):
+            return []
+        subtasks_desc = result.get("subtasks", [])
+        if len(subtasks_desc) < 2:
+            return []
+
+        child_ids: list[str] = []
+        for desc in subtasks_desc:
+            child = create_task(desc, source=f"decomposed:{task_id}")
+            update_task(child["id"], parent_id=task_id)
+            child_ids.append(child["id"])
+
+        update_task(task_id, status="decomposed",
+                    result=f"서브태스크 {len(child_ids)}개로 분해: {', '.join(child_ids)}")
+        _notify(
+            f"🔀 <b>태스크 분해됨</b>\n"
+            f"<code>{task_id}</code> → {len(child_ids)}개 서브태스크\n"
+            + "\n".join(f"  • <code>{cid}</code>: {subtasks_desc[i][:60]}"
+                        for i, cid in enumerate(child_ids))
+        )
+        log.info("태스크 %s → 서브태스크 %d개 생성", task_id, len(child_ids))
+        return child_ids
+    except Exception as e:
+        log.warning("태스크 분해 실패 (단일 실행으로 진행): %s", e)
+        return []
 
 
 def _review_changes(task_id: str, description: str, model) -> dict:
