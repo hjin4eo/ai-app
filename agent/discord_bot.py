@@ -162,10 +162,36 @@ def _ask_llama_cpp(prompt: str, system_prompt: str = "", max_tokens: int = 8192,
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         text = json.loads(resp.read())["choices"][0]["message"]["content"]
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+    return re.sub(r'<\|[^|]*\|>', '', text).strip()
+
+
+def _ask_unsloth(prompt: str, system_prompt: str = "", max_tokens: int = 8192, timeout: int = 300) -> str:
+    import urllib.request, os
+    base_url = os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1").rstrip("/")
+    api_key = os.environ.get("UNSLOTH_API_KEY", "")
+    model = os.environ.get("UNSLOTH_MODEL", "")
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    body: dict = {"messages": messages, "max_tokens": max_tokens}
+    if model:
+        body["model"] = model
+    payload = json.dumps(body).encode()
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(f"{base_url}/chat/completions", data=payload, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        text = json.loads(resp.read())["choices"][0]["message"]["content"]
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text)
     return re.sub(r'<\|[^|]*\|>', '', text).strip()
 
 
 def ask_ollama(prompt: str, system_prompt: str = "", max_tokens: int = 8192, timeout: int = 300) -> str:
+    if MODEL_BACKEND == "unsloth":
+        return _ask_unsloth(prompt, system_prompt, max_tokens, timeout)
     if MODEL_BACKEND == "llama-cpp":
         return _ask_llama_cpp(prompt, system_prompt, max_tokens, timeout)
     return _ask_ollama_raw(prompt, system_prompt, max_tokens, timeout)

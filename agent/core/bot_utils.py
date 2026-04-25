@@ -308,7 +308,7 @@ async def _ask_llama_cpp(prompt: str, system_prompt: str = "", images: Optional[
     else:
         messages.append({"role": "user", "content": prompt})
 
-    from core.shared import _clean_llm_output
+    import re
     payload: Dict[str, Any] = {"messages": messages, "max_tokens": max_tokens}
     if LLAMA_CPP_MODEL:
         payload["model"] = LLAMA_CPP_MODEL
@@ -321,7 +321,46 @@ async def _ask_llama_cpp(prompt: str, system_prompt: str = "", images: Optional[
                 raise Exception(f"llama-cpp server returned status {resp.status}")
             data = await resp.json()
             text = data["choices"][0]["message"]["content"]
-    return _clean_llm_output(text)
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+    return re.sub(r'<\|[^|]*\|>', '', text).strip()
+
+async def _ask_unsloth(prompt: str, system_prompt: str = "", images: Optional[List[str]] = None,
+                      max_tokens: int = 8192, timeout: int = 300,
+                      history: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
+    import os, re
+    base_url = os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1").rstrip("/")
+    api_key = os.environ.get("UNSLOTH_API_KEY", "")
+    model = os.environ.get("UNSLOTH_MODEL", "")
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    if history:
+        messages.extend(history)
+    if images:
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for img_b64 in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": prompt})
+    payload: Dict[str, Any] = {"messages": messages, "max_tokens": max_tokens}
+    if model:
+        payload["model"] = model
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"{base_url}/chat/completions", json=payload,
+                                headers=headers, timeout=timeout) as resp:
+            if resp.status != 200:
+                error_body = await resp.text()
+                log.error(f"unsloth error {resp.status}: {error_body}")
+                raise Exception(f"Unsloth Studio returned status {resp.status}")
+            data = await resp.json()
+            text = data["choices"][0]["message"]["content"]
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+    return re.sub(r'<\|[^|]*\|>', '', text).strip()
+
 
 async def ask_ollama(prompt: str, system_prompt: str = "", images: Optional[List[str]] = None,
                     max_tokens: int = 8192, timeout: int = 300,
@@ -330,6 +369,9 @@ async def ask_ollama(prompt: str, system_prompt: str = "", images: Optional[List
     """
     Main entry point for model interaction. Automatically chooses backend.
     """
+    if MODEL_BACKEND == "unsloth":
+        return await _ask_unsloth(prompt, system_prompt, images, max_tokens, timeout,
+                                  history=messages)
     if MODEL_BACKEND == "llama-cpp":
         return await _ask_llama_cpp(prompt, system_prompt, images, max_tokens, timeout,
                                     history=messages, num_ctx=num_ctx, keep_alive=keep_alive)
@@ -474,11 +516,13 @@ async def ask_ollama_with_tools(messages: List[Dict[str, str]], system_prompt: s
         final_messages.append({"role": "system", "content": system_prompt})
     final_messages.extend(messages)
 
-    # LM Studio는 Ollama tool call 형식 미지원 → ask_ollama로 폴백
+    # Ollama tool call 형식 미지원 백엔드 → 일반 채팅으로 폴백
     if MODEL_BACKEND == "llama-cpp":
         prompt = final_messages[-1].get("content", "") if final_messages else ""
-        sys_p = system_prompt
-        return await _ask_llama_cpp(prompt, sys_p)
+        return await _ask_llama_cpp(prompt, system_prompt)
+    if MODEL_BACKEND == "unsloth":
+        prompt = final_messages[-1].get("content", "") if final_messages else ""
+        return await _ask_unsloth(prompt, system_prompt)
 
     async with aiohttp.ClientSession() as session:
         for _ in range(8):

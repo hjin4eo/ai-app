@@ -937,12 +937,16 @@ async def cmd_switch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         _set_env("EMBEDDING_BACKEND", "ollama")
         await update.message.reply_text("✅ Ollama 모드로 전환됨 (포트 11434)\n🔄 봇 재시작 중...")
         asyncio.create_task(_restart())
+    elif arg == "unsloth":
+        _set_env("MODEL_BACKEND", "unsloth")
+        await update.message.reply_text("✅ Unsloth Studio 모드로 전환됨 (포트 8888)\n🔄 봇 재시작 중...")
+        asyncio.create_task(_restart())
     else:
         import core.bot_config as _cfg
         current = _cfg.MODEL_BACKEND
         embed = _cfg.EMBEDDING_BACKEND
         await update.message.reply_text(
             f"현재: <code>{current}</code> / 임베딩: <code>{embed}</code>\n\n"
-            f"사용법:\n/switch lm — LM Studio\n/switch ollama — Ollama",
+            f"사용법:\n/switch lm — LM Studio\n/switch ollama — Ollama\n/switch unsloth — Unsloth Studio",
             parse_mode="HTML"
         )

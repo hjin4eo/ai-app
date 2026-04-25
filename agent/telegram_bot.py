@@ -453,6 +453,15 @@ async def main() -> None:
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        from telegram.error import TimedOut, NetworkError
+        if isinstance(context.error, (TimedOut, NetworkError)):
+            log.debug("Telegram 네트워크 오류 (자동 복구): %s", context.error)
+        else:
+            log.error("Telegram 봇 오류: %s", context.error, exc_info=context.error)
+
+    app.add_error_handler(error_handler)
+
     # 명령어 핸들러 등록
     app.add_handler(CommandHandler("start", cmd_help))
     app.add_handler(CommandHandler("help", cmd_help))

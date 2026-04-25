@@ -291,6 +291,7 @@ class LlamaCppModel(BaseModel):
         import re
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = json.loads(resp.read())["choices"][0]["message"]["content"]
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
         return re.sub(r'<\|[^|]*\|>', '', text).strip()
 
     def fix_code(self, error_log: str, code_context: str) -> str:
@@ -416,8 +417,52 @@ class OllamaModel(BaseModel):
         return json.loads(text.strip())
 
 
+class UnslothModel(BaseModel):
+    """Unsloth Studio OpenAI 호환 서버용 모델."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:8888/v1", api_key: str = "", model: str = ""):
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+
+    def _call(self, system: str, user: str, max_tokens: int = 4096, timeout: int = 300) -> str:
+        import urllib.request, re
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        body: dict = {"messages": messages, "max_tokens": max_tokens}
+        if self._model:
+            body["model"] = self._model
+        payload = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        req = urllib.request.Request(
+            f"{self._base_url}/chat/completions",
+            data=payload,
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = json.loads(resp.read())["choices"][0]["message"]["content"]
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+        return re.sub(r'<\|[^|]*\|>', '', text).strip()
+
+    def fix_code(self, error_log: str, code_context: str) -> str:
+        return self._call(
+            SYSTEM_PROMPT,
+            f"## Test failure log\n```\n{error_log}\n```\n\n## Source code\n```\n{code_context}\n```",
+        )
+
+    def generate_code(self, request: str) -> dict[str, str]:
+        text = self._call(GENERATE_PROMPT, request, max_tokens=8192, timeout=600)
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+
+
 def get_model(cfg: dict) -> BaseModel:
-    choice = cfg["agent"]["model"]
+    import os
+    choice = os.environ.get("MODEL_BACKEND") or cfg["agent"]["model"]
     if choice == "claude":
         return ClaudeModel(api_key=cfg["anthropic"]["api_key"])
     elif choice == "openai":
@@ -432,5 +477,11 @@ def get_model(cfg: dict) -> BaseModel:
             base_url=cfg.get("llama_cpp", {}).get("url", "http://localhost:1234"),
             model=cfg.get("llama_cpp", {}).get("model", ""),
         )
+    elif choice == "unsloth":
+        return UnslothModel(
+            base_url=os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1"),
+            api_key=os.environ.get("UNSLOTH_API_KEY", ""),
+            model=os.environ.get("UNSLOTH_MODEL", ""),
+        )
     else:
-        raise ValueError(f"Unknown model: {choice}. Choose claude / openai / ollama / llama-cpp")
+        raise ValueError(f"Unknown model: {choice}. Choose claude / openai / ollama / llama-cpp / unsloth")

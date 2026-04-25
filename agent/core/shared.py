@@ -295,10 +295,46 @@ def _ask_llama_cpp(prompt: str, system_prompt: str = "", images: list | None = N
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = json.loads(resp.read())["choices"][0]["message"]["content"]
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
         return re.sub(r'<\|[^|]*\|>', '', text).strip()
     except urllib.request.HTTPError as e:
         body_err = e.read().decode("utf-8", errors="replace")
         log.error("llama-cpp %s: %s", e.code, body_err)
+        raise
+
+
+def _ask_unsloth(prompt: str, system_prompt: str = "", images: list | None = None,
+                 max_tokens: int = 8192, timeout: int = 300, **kwargs) -> str:
+    import os
+    base_url = os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1").rstrip("/")
+    api_key = os.environ.get("UNSLOTH_API_KEY", "")
+    model = os.environ.get("UNSLOTH_MODEL", "")
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    if images:
+        content = [{"type": "text", "text": prompt}]
+        for img_b64 in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": prompt})
+    body: dict = {"messages": messages, "max_tokens": max_tokens}
+    if model:
+        body["model"] = model
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(f"{base_url}/chat/completions", data=payload, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = json.loads(resp.read())["choices"][0]["message"]["content"]
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+        return re.sub(r'<\|[^|]*\|>', '', text).strip()
+    except urllib.request.HTTPError as e:
+        body_err = e.read().decode("utf-8", errors="replace")
+        log.error("unsloth %s: %s", e.code, body_err)
         raise
 
 
@@ -311,6 +347,8 @@ def ask_ollama(prompt: str, system_prompt: str = "", images: list | None = None,
     time_info = f"\n\n[현재 시각 및 요건]\n- 일시: {now.strftime('%Y년 %m월 %d일 %A %H:%M:%S')}"
     system_prompt += time_info
 
+    if MODEL_BACKEND == "unsloth":
+        return _ask_unsloth(prompt, system_prompt, images, max_tokens, timeout)
     if MODEL_BACKEND == "llama-cpp":
         return _ask_llama_cpp(prompt, system_prompt, images, max_tokens, timeout,
                               num_ctx=num_ctx, keep_alive=keep_alive)
@@ -394,10 +432,13 @@ def ask_ollama_with_tools(messages: list[dict], system_prompt: str = "",
         final_messages.append({"role": "system", "content": system_prompt})
     final_messages.extend(messages)
 
-    # LM Studio는 Ollama tool call 형식 미지원 → 일반 채팅으로 폴백
+    # Ollama tool call 형식 미지원 백엔드 → 일반 채팅으로 폴백
     if MODEL_BACKEND == "llama-cpp":
         prompt = final_messages[-1].get("content", "") if final_messages else ""
         return _ask_llama_cpp(prompt, system_prompt)
+    if MODEL_BACKEND == "unsloth":
+        prompt = final_messages[-1].get("content", "") if final_messages else ""
+        return _ask_unsloth(prompt, system_prompt)
 
     for _ in range(8):
         payload = {
