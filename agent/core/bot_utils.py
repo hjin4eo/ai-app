@@ -506,23 +506,98 @@ async def _exec_tool(name: str, args: Dict[str, Any], allow_write: bool = False)
         log.error(f"Tool execution error: {e}")
         return f"Tool Error: {e}"
 
+async def _openai_tools_loop(messages: List[Dict[str, Any]], base_url: str, api_key: str,
+                             model: str, allow_write: bool, max_iter: int = 8) -> str:
+    """OpenAI-호환 서버용 tool calling 루프 (unsloth / llama-cpp)."""
+    import re
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    async with aiohttp.ClientSession() as session:
+        for _ in range(max_iter):
+            payload: Dict[str, Any] = {
+                "messages": messages,
+                "tools": FS_TOOLS,
+                "max_tokens": 4096,
+            }
+            if model:
+                payload["model"] = model
+
+            async with session.post(f"{base_url}/chat/completions", json=payload,
+                                    headers=headers, timeout=300) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    log.error(f"openai tools API error {resp.status}: {err}")
+                    raise Exception(f"API returned status {resp.status}")
+                result = await resp.json()
+
+            choices = result.get("choices") or []
+            if not choices:
+                return ""
+            msg = choices[0].get("message", {}) or {}
+            tool_calls = msg.get("tool_calls") or []
+
+            if not tool_calls:
+                content = msg.get("content") or ""
+                content = re.sub(r'<think>[\s\S]*?</think>', '', content)
+                return re.sub(r'<\|[^|]*\|>', '', content).strip()
+
+            messages.append({
+                "role": "assistant",
+                "content": msg.get("content") or "",
+                "tool_calls": tool_calls,
+            })
+
+            for tc in tool_calls:
+                fn = tc.get("function", {}) or {}
+                args_raw = fn.get("arguments", "{}")
+                if isinstance(args_raw, str):
+                    try:
+                        args = json.loads(args_raw)
+                    except json.JSONDecodeError:
+                        args = {}
+                else:
+                    args = args_raw or {}
+                tool_result = await _exec_tool(fn.get("name", ""), args, allow_write)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": tool_result,
+                })
+
+    return messages[-1].get("content") or ""
+
+
 async def ask_ollama_with_tools(messages: List[Dict[str, str]], system_prompt: str = "",
                                 allow_write: bool = False) -> str:
     """
-    Tool calling loop. LM Studio 백엔드 시 tool call 없이 일반 채팅으로 폴백.
+    Tool calling loop. 백엔드별 분기:
+    - ollama: /api/chat (Ollama 네이티브)
+    - unsloth / llama-cpp: /v1/chat/completions (OpenAI 표준)
     """
     final_messages: List[Dict[str, Any]] = []
     if system_prompt:
         final_messages.append({"role": "system", "content": system_prompt})
     final_messages.extend(messages)
 
-    # Ollama tool call 형식 미지원 백엔드 → 일반 채팅으로 폴백
-    if MODEL_BACKEND == "llama-cpp":
-        prompt = final_messages[-1].get("content", "") if final_messages else ""
-        return await _ask_llama_cpp(prompt, system_prompt)
     if MODEL_BACKEND == "unsloth":
-        prompt = final_messages[-1].get("content", "") if final_messages else ""
-        return await _ask_unsloth(prompt, system_prompt)
+        import os
+        return await _openai_tools_loop(
+            final_messages,
+            base_url=os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1").rstrip("/"),
+            api_key=os.environ.get("UNSLOTH_API_KEY", ""),
+            model=os.environ.get("UNSLOTH_MODEL", ""),
+            allow_write=allow_write,
+        )
+    if MODEL_BACKEND == "llama-cpp":
+        return await _openai_tools_loop(
+            final_messages,
+            base_url=f"{LLAMA_CPP_URL}/v1",
+            api_key="",
+            model=LLAMA_CPP_MODEL,
+            allow_write=allow_write,
+        )
 
     async with aiohttp.ClientSession() as session:
         for _ in range(8):

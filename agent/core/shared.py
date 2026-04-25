@@ -425,6 +425,66 @@ def _exec_tool(name: str, args: dict, allow_write: bool = False) -> str:
         return f"툴 오류: {e}"
 
 
+def _openai_tools_loop(messages: list[dict], base_url: str, api_key: str,
+                       model: str, allow_write: bool, max_iter: int = 8) -> str:
+    """OpenAI-호환 서버용 동기 tool calling 루프."""
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    for _ in range(max_iter):
+        body: dict = {"messages": messages, "tools": FS_TOOLS, "max_tokens": 4096}
+        if model:
+            body["model"] = model
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(body).encode(),
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                result = json.loads(resp.read())
+        except urllib.request.HTTPError as e:
+            log.error("openai tools %s: %s", e.code, e.read().decode("utf-8", errors="replace"))
+            raise
+
+        choices = result.get("choices") or []
+        if not choices:
+            return ""
+        msg = choices[0].get("message", {}) or {}
+        tool_calls = msg.get("tool_calls") or []
+
+        if not tool_calls:
+            content = msg.get("content") or ""
+            content = re.sub(r'<think>[\s\S]*?</think>', '', content)
+            return re.sub(r'<\|[^|]*\|>', '', content).strip()
+
+        messages.append({
+            "role": "assistant",
+            "content": msg.get("content") or "",
+            "tool_calls": tool_calls,
+        })
+
+        for tc in tool_calls:
+            fn = tc.get("function", {}) or {}
+            args_raw = fn.get("arguments", "{}")
+            if isinstance(args_raw, str):
+                try:
+                    args = json.loads(args_raw)
+                except json.JSONDecodeError:
+                    args = {}
+            else:
+                args = args_raw or {}
+            tool_result = _exec_tool(fn.get("name", ""), args, allow_write)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "content": tool_result,
+            })
+
+    return messages[-1].get("content") or ""
+
+
 def ask_ollama_with_tools(messages: list[dict], system_prompt: str = "",
                           allow_write: bool = False) -> str:
     final_messages: list[dict] = []
@@ -432,13 +492,23 @@ def ask_ollama_with_tools(messages: list[dict], system_prompt: str = "",
         final_messages.append({"role": "system", "content": system_prompt})
     final_messages.extend(messages)
 
-    # Ollama tool call 형식 미지원 백엔드 → 일반 채팅으로 폴백
-    if MODEL_BACKEND == "llama-cpp":
-        prompt = final_messages[-1].get("content", "") if final_messages else ""
-        return _ask_llama_cpp(prompt, system_prompt)
     if MODEL_BACKEND == "unsloth":
-        prompt = final_messages[-1].get("content", "") if final_messages else ""
-        return _ask_unsloth(prompt, system_prompt)
+        import os
+        return _openai_tools_loop(
+            final_messages,
+            base_url=os.environ.get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1").rstrip("/"),
+            api_key=os.environ.get("UNSLOTH_API_KEY", ""),
+            model=os.environ.get("UNSLOTH_MODEL", ""),
+            allow_write=allow_write,
+        )
+    if MODEL_BACKEND == "llama-cpp":
+        return _openai_tools_loop(
+            final_messages,
+            base_url=f"{LLAMA_CPP_URL}/v1",
+            api_key="",
+            model=LLAMA_CPP_MODEL,
+            allow_write=allow_write,
+        )
 
     for _ in range(8):
         payload = {
