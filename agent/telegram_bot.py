@@ -335,10 +335,11 @@ async def msg_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
             await _status("📂 지식 탐색 + 🌐 최신 정보 검색 중...")
 
-            # RAG + Naver 웹 항상 동시 실행
-            rag_result, naver_result = await asyncio.gather(
+            # RAG + Naver + Tavily 항상 동시 실행
+            rag_result, naver_result, tavily_result = await asyncio.gather(
                 rag_manager.query_knowledge(text),
                 agent._fetch_naver(text),
+                agent._fetch_tavily(text),
             )
 
             parts = []
@@ -346,6 +347,8 @@ async def msg_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parts.append(rag_result)
             if naver_result:
                 parts.append(f"[Naver 최신 검색]\n{naver_result}")
+            if tavily_result:
+                parts.append(f"[Tavily 실시간 웹]\n{tavily_result}")
 
             # RAG + Naver 둘 다 없으면 → 전체 외부 소스 확장
             if not parts:
@@ -384,7 +387,8 @@ async def msg_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await status_msg.delete()
                 await _send_long(update, f"🛒 {text} — 네이버 쇼핑 기준\n\n{cleaned}")
                 await _save_history(chat_id, "user", text)
-                await _save_history(chat_id, "assistant", cleaned)
+                if cleaned.strip():
+                    await _save_history(chat_id, "assistant", cleaned)
                 return
 
         effective_text = text
@@ -432,7 +436,8 @@ async def msg_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await status_msg.delete()
         await _send_long(update, cleaned)
         await _save_history(chat_id, "user", text)
-        await _save_history(chat_id, "assistant", cleaned)
+        if cleaned.strip():
+            await _save_history(chat_id, "assistant", cleaned)
 
         # [보완] 자동 요약 체크
         from core.bot_utils import check_and_summarize
@@ -451,7 +456,15 @@ async def main() -> None:
     # 1. 시스템 복구
     await asyncio.to_thread(run_startup_recovery)
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .connect_timeout(15.0)
+        .read_timeout(120.0)
+        .write_timeout(120.0)
+        .pool_timeout(15.0)
+        .build()
+    )
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         from telegram.error import TimedOut, NetworkError

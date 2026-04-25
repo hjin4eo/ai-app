@@ -40,6 +40,7 @@ from .bot_config import (
     KNOWLEDGE_DIR,
     NAVER_CLIENT_ID,
     NAVER_CLIENT_SECRET,
+    TAVILY_API_KEY,
 )
 from .bot_utils import ask_ollama
 from services import rag_manager
@@ -119,6 +120,7 @@ class Agent:
         results = await asyncio.gather(
             self._fetch_naver_shopping(query),   # 쇼핑(가격) 우선
             self._fetch_naver(query),
+            self._fetch_tavily(query),
             self._fetch_wikipedia(query),
             self._fetch_arxiv(query),
             self._fetch_semantic_scholar(query),
@@ -126,7 +128,7 @@ class Agent:
             return_exceptions=True,
         )
 
-        source_names = ["NaverShopping", "Naver", "Wikipedia", "arXiv", "SemanticScholar", "PubMed"]
+        source_names = ["NaverShopping", "Naver", "Tavily", "Wikipedia", "arXiv", "SemanticScholar", "PubMed"]
         parts: list[str] = []
         active_sources: list[str] = []
 
@@ -222,6 +224,48 @@ class Agent:
             return "\n".join(lines)
         except Exception as e:
             log.warning(f"[Agent] Naver 오류: {e}")
+            return ""
+
+    async def _fetch_tavily(self, query: str) -> str:
+        """
+        Tavily Search API. LLM용 실시간 웹 검색.
+        AI 뉴스·최신 정보 강세. answer + 상위 결과 요약 반환.
+        """
+        if not TAVILY_API_KEY:
+            return ""
+        try:
+            payload = {
+                "query": query,
+                "search_depth": "basic",
+                "max_results": 5,
+                "include_answer": True,
+            }
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    "https://api.tavily.com/search",
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {TAVILY_API_KEY}",
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            lines: list[str] = []
+            answer = (data.get("answer") or "").strip()
+            if answer:
+                lines.append(f"요약: {answer}")
+            for item in (data.get("results") or [])[:5]:
+                title = (item.get("title") or "").strip()
+                url = (item.get("url") or "").strip()
+                content = (item.get("content") or "").strip()
+                if not title and not content:
+                    continue
+                lines.append(f"- {title} ({url})\n  {content[:300]}")
+            return "\n".join(lines)
+        except Exception as e:
+            log.warning(f"[Agent] Tavily 오류: {e}")
             return ""
 
     async def _fetch_wikipedia(self, query: str) -> str:

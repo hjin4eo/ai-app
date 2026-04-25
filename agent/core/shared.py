@@ -433,7 +433,13 @@ def _openai_tools_loop(messages: list[dict], base_url: str, api_key: str,
         headers["Authorization"] = f"Bearer {api_key}"
 
     for _ in range(max_iter):
-        body: dict = {"messages": messages, "tools": FS_TOOLS, "max_tokens": 4096}
+        clean_messages = [
+            m for m in messages
+            if not (m.get("role") == "assistant"
+                    and not (m.get("content") or "").strip()
+                    and not m.get("tool_calls"))
+        ]
+        body: dict = {"messages": clean_messages, "tools": FS_TOOLS, "max_tokens": 4096}
         if model:
             body["model"] = model
         req = urllib.request.Request(

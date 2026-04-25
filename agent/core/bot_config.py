@@ -100,6 +100,7 @@ EMBEDDING_URL: str = OLLAMA_URL if EMBEDDING_BACKEND == "ollama" else LLAMA_CPP_
 RUNNER_PATTERN: str = CFG.get("github_runner", {}).get("service_pattern", "")
 NAVER_CLIENT_ID: str = os.environ.get("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET: str = os.environ.get("NAVER_CLIENT_SECRET", "")
+TAVILY_API_KEY: str = os.environ.get("TAVILY_API_KEY", "")
 
 OLLAMA_NUM_CTX: int = int(CFG.get("agent", {}).get("num_ctx", 16384))
 VISION_NUM_CTX: int = int(CFG.get("agent", {}).get("vision_num_ctx", 6000))

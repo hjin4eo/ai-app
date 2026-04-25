@@ -335,7 +335,10 @@ async def _ask_unsloth(prompt: str, system_prompt: str = "", images: Optional[Li
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     if history:
-        messages.extend(history)
+        for m in history:
+            if m.get("role") == "assistant" and not (m.get("content") or "").strip() and not m.get("tool_calls"):
+                continue
+            messages.append(m)
     if images:
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for img_b64 in images:
@@ -516,8 +519,14 @@ async def _openai_tools_loop(messages: List[Dict[str, Any]], base_url: str, api_
 
     async with aiohttp.ClientSession() as session:
         for _ in range(max_iter):
+            clean_messages = [
+                m for m in messages
+                if not (m.get("role") == "assistant"
+                        and not (m.get("content") or "").strip()
+                        and not m.get("tool_calls"))
+            ]
             payload: Dict[str, Any] = {
-                "messages": messages,
+                "messages": clean_messages,
                 "tools": FS_TOOLS,
                 "max_tokens": 4096,
             }
